@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "scripts": {
     "compile": "hardhat compile",
-    "deploy": "hardhat run scripts/deploy.js --network kaspaTestnet"
+    "deploy": "hardhat run scripts/deploy.js --network kaspaTestnet",
+    "start": "node server.js"         // if you have a minimal web server for Heroku
   },
   "dependencies": {
     "hardhat": "^2.24.1",
