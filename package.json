@@ -2,13 +2,13 @@
   "name": "proof-of-work",
   "version": "1.0.0",
   "scripts": {
-    "compile": "npx hardhat compile",
-    "deploy": "npx hardhat run scripts/deploy.js --network kaspaTestnet"
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.js --network kaspaTestnet"
   },
-  "devDependencies": {
+  "dependencies": {
+    "hardhat": "^2.24.1",
     "@nomiclabs/hardhat-ethers": "^2.1.2",
-    "dotenv": "^16.0.3",
     "ethers": "^5.7.2",
-    "hardhat": "^2.12.7"
+    "dotenv": "^16.0.3"
   }
 }
