@@ -2,9 +2,9 @@
   "name": "proof-of-work",
   "version": "1.0.0",
   "scripts": {
+    "start": "node server.js",
     "compile": "hardhat compile",
-    "deploy": "hardhat run scripts/deploy.js --network kaspaTestnet",
-    "start": "node server.js"         
+    "deploy": "hardhat run scripts/deploy.js --network kaspaTestnet"
   },
   "dependencies": {
     "hardhat": "^2.24.1",
