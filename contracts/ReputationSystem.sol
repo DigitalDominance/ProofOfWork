@@ -5,6 +5,11 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @notice Tracks employer & worker reputation on-chain
 contract ReputationSystem is Ownable {
+    /// @param initialOwner the address that may call update functions
+    constructor(address initialOwner)
+        Ownable(initialOwner)
+    {}
+
     mapping(address => uint256) public workerScore;
     mapping(address => uint256) public employerScore;
 
