@@ -2,7 +2,7 @@ require("dotenv").config();
 require("@nomiclabs/hardhat-ethers");
 
 module.exports = {
-  solidity: "0.8.17",
+  solidity: "0.8.20",
   networks: {
     kaspaTestnet: {
       url: process.env.KASPA_TESTNET_RPC,
