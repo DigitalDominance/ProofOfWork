@@ -6,7 +6,7 @@ module.exports = {
   networks: {
     kaspaTestnet: {
       url: process.env.KASPA_TESTNET_RPC,
-      chainId: 12211,
+      chainId: 167012,
       accounts: [process.env.PRIVATE_KEY]
     }
   }
