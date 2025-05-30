@@ -13,7 +13,10 @@ contract JobFactory is Ownable, ReentrancyGuard {
     uint256 public constant PLATFORM_FEE_BPS = 75;
     address payable public feeRecipient;
 
-    constructor(address payable _feeRecipient) {
+    /// @param _feeRecipient where fees will accrue
+    constructor(address payable _feeRecipient)
+        Ownable(msg.sender)
+    {
         require(_feeRecipient != address(0), "Bad fee recipient");
         feeRecipient = _feeRecipient;
     }
@@ -25,13 +28,6 @@ contract JobFactory is Ownable, ReentrancyGuard {
     }
 
     /// @notice Create a new job.  
-    /// @param payType 0 = weekly; 1 = one-off  
-    /// @param weeklyPay amount per week (ignored if one-off)  
-    /// @param durationWeeks # of weeks to pay (ignored if one-off)  
-    /// @param totalPay total locked (only for one-off)  
-    /// @param title brief job title  
-    /// @param description full text description  
-    /// @param numPositions how many workers may be assigned  
     function createJob(
         uint8 payType,
         uint256 weeklyPay,
