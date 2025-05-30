@@ -61,7 +61,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         feeRecipient   = _feeRecipient;
 
         // deploy or link shared modules
-        reputation = new ReputationSystem();
+        reputation = new ReputationSystem(address(this));
         disputeDAO = new DisputeDAO();
     }
 
