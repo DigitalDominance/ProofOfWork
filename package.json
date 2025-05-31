@@ -10,7 +10,7 @@
     "express": "^4.18.2",
     "cors": "^2.8.5",
     "hardhat": "^2.24.1",
-    "@nomiclabs/hardhat-ethers": "^2.1.2",]
+    "@nomiclabs/hardhat-ethers": "^2.1.2",
     "@nomicfoundation/hardhat-toolbox": "^3.0.0",
     "@nomicfoundation/hardhat-verify": "^2.0.7",
     "ethers": "^5.7.2",
