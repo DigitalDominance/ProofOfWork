@@ -1,7 +1,7 @@
 // hardhat.config.js
 
 require("dotenv").config();
-require("@nomiclabs/hardhat-ethers");
+require("@nomicfoundation/hardhat-ethers");
 require("@nomicfoundation/hardhat-verify");        // ← added Hardhat-Verify plugin
 
 /**
