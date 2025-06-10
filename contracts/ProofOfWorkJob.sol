@@ -1,30 +1,35 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./ReputationSystem.sol";
 import "./DisputeDAO.sol";
 
-/// @notice One job instance managing funds, assignments, and payouts
+/// @notice One job instance managing funds, assignments, payouts, and juror disputes
 contract ProofOfWorkJob is ReentrancyGuard {
     enum PayType { WEEKLY, ONE_OFF }
-    PayType   public immutable payType;
-    address   public immutable employer;
-    uint256   public immutable weeklyPay;
-    uint256   public immutable durationWeeks;
-    uint256   public immutable totalPay;
-    uint256   public immutable createdAt;
-    uint256   public lastPayoutAt;
-    uint256   public payoutsMade;
-    uint256   public positions;
-    uint256   public platformFeeBps;
-    address payable public feeRecipient;
+
+    PayType public immutable payType;
+    address public immutable employer;
+    uint256 public immutable weeklyPay;
+    uint256 public immutable durationWeeks;
+    uint256 public immutable totalPay;
+    uint256 public immutable createdAt;
+    uint256 public lastPayoutAt;
+    uint256 public payoutsMade;
+    uint256 public positions;
+
+    string public title;
+    string public description;
 
     ReputationSystem public reputation;
-    DisputeDAO       public disputeDAO;
+    DisputeDAO public disputeDAO;
 
-    mapping(address => bool)   public isWorker;
-    mapping(address => bool)   public activeWorker;
+    address[] public assignedWorkers;
+    mapping(address => bool) public isWorker;
+    mapping(address => bool) public activeWorker;
+
+    address public constant ADMIN = 0xA0c5048c32870bB66d0BE861643cD6Bb5F66Ada2;
 
     event WorkerAssigned(address indexed worker);
     event PaymentReleased(address indexed worker, uint256 amount);
@@ -37,107 +42,107 @@ contract ProofOfWorkJob is ReentrancyGuard {
         _;
     }
 
+    modifier onlyAdmin() {
+        require(msg.sender == ADMIN, "Only admin");
+        _;
+    }
+
     constructor(
         address _employer,
         uint8 _payType,
         uint256 _weeklyPay,
         uint256 _durationWeeks,
         uint256 _totalPay,
-        string memory /*title*/,
-        string memory /*description*/,
-        uint256 _positions,
-        address payable _feeRecipient,
-        uint256 _platformFeeBps
+        string memory _title,
+        string memory _description,
+        uint256 _positions
     ) payable {
-        employer       = _employer;
-        payType        = PayType(_payType);
-        weeklyPay      = _weeklyPay;
-        durationWeeks  = _durationWeeks;
-        totalPay       = _totalPay;
-        positions      = _positions;
-        createdAt      = block.timestamp;
-        lastPayoutAt   = block.timestamp;
-        platformFeeBps = _platformFeeBps;
-        feeRecipient   = _feeRecipient;
+        employer = _employer;
+        payType = PayType(_payType);
+        weeklyPay = _weeklyPay;
+        durationWeeks = _durationWeeks;
+        totalPay = _totalPay;
+        positions = _positions;
+        createdAt = block.timestamp;
+        lastPayoutAt = block.timestamp;
 
-        // deploy or link shared modules
+        title = _title;
+        description = _description;
+
         reputation = new ReputationSystem(address(this));
-        disputeDAO = new DisputeDAO();
+        disputeDAO = new DisputeDAO(address(this));
     }
 
-    /// @notice Employer assigns a worker to one of the positions
     function assignWorker(address worker) external onlyEmployer {
         require(worker != address(0), "Bad worker");
         require(!isWorker[worker], "Already assigned");
-        require(payoutsMade < positions, "All positions full");
+        require(assignedWorkers.length < positions, "Max positions filled");
+
         isWorker[worker] = true;
         activeWorker[worker] = true;
+        assignedWorkers.push(worker);
+
         emit WorkerAssigned(worker);
     }
 
-    /// @notice Worker or employer can mark active/inactive
+    function getAssignedWorkers() external view returns (address[] memory) {
+        return assignedWorkers;
+    }
+
     function setActive(bool active) external {
-        require(isWorker[msg.sender], "Not a worker");
+        require(isWorker[msg.sender], "Not worker");
         activeWorker[msg.sender] = active;
     }
 
-    /// @notice Release weekly payouts (for WEEKLY jobs)
     function releaseWeekly() external nonReentrant {
-        require(payType == PayType.WEEKLY, "Not weekly job");
+        require(payType == PayType.WEEKLY, "Not weekly");
         require(block.timestamp >= lastPayoutAt + 1 weeks, "Too soon");
-        require(payoutsMade < durationWeeks, "All payouts done");
-
-        uint256 gross = weeklyPay;
-        uint256 fee   = (gross * platformFeeBps) / 10_000;
-        uint256 net   = gross - fee;
+        require(payoutsMade < durationWeeks, "All paid");
 
         lastPayoutAt = block.timestamp;
         payoutsMade++;
 
-        // send platform fee
-        (bool f1, ) = feeRecipient.call{value: fee}("");
-        require(f1, "Fee send fail");
-
-        // send worker payment
-        address payable worker = payable(msg.sender);
-        require(activeWorker[worker], "Not active");
-        (bool s1, ) = worker.call{value: net}("");
-        require(s1, "Pay fail");
-
-        reputation.updateWorker(worker, 1);
-        emit PaymentReleased(worker, net);
-    }
-
-    /// @notice Release one-off payment (for ONE_OFF jobs)
-    function releaseOneOff() external nonReentrant {
-        require(payType == PayType.ONE_OFF, "Not one-off job");
-        require(isWorker[msg.sender], "Not assigned");
-        require(activeWorker[msg.sender], "Not active");
-
-        uint256 gross = totalPay;
-        uint256 fee   = (gross * platformFeeBps) / 10_000;
-        uint256 net   = gross - fee;
-
-        // prevent reentrancy
-        totalPay == 0;
-
-        // send platform fee
-        (bool f2, ) = feeRecipient.call{value: fee}("");
-        require(f2, "Fee send fail");
-
-        // send rest to worker
+        uint256 amount = weeklyPay;
         address payable w = payable(msg.sender);
-        (bool s2, ) = w.call{value: net}("");
-        require(s2, "Pay fail");
+        require(activeWorker[w], "Inactive");
+
+        (bool s,) = w.call{value: amount}("");
+        require(s, "Pay failed");
 
         reputation.updateWorker(w, 1);
-        emit OneOffPayment(w, net);
+        emit PaymentReleased(w, amount);
+    }
+
+    function releaseOneOff() external nonReentrant {
+        require(payType == PayType.ONE_OFF, "Not one-off");
+        require(isWorker[msg.sender], "Not assigned");
+        require(activeWorker[msg.sender], "Inactive");
+
+        uint256 amount = totalPay;
+        address payable w = payable(msg.sender);
+
+        (bool s,) = w.call{value: amount}("");
+        require(s, "Pay failed");
+
+        reputation.updateWorker(w, 1);
+        emit OneOffPayment(w, amount);
         emit JobCompleted(w);
     }
 
-    /// @notice Anyone can open a dispute; DAO handles resolution
     function openDispute() external {
         uint256 id = disputeDAO.createDispute(address(this), 0);
         emit DisputeOpened(msg.sender, id);
+    }
+
+    function addJuror(address juror) external onlyAdmin {
+        disputeDAO.addJuror(juror);
+    }
+
+    function removeJuror(address juror) external onlyAdmin {
+        disputeDAO.removeJuror(juror);
+    }
+
+    function getJurors() external view returns (address[] memory) {
+        return disputeDAO.getJurors();
     }
 }
