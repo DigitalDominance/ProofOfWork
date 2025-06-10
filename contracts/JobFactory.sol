@@ -8,7 +8,7 @@ import "./ProofOfWorkJob.sol";
 contract JobFactory is Ownable, ReentrancyGuard {
     event JobCreated(address indexed jobAddress, address indexed employer);
 
-    constructor() Ownable(msg.sender) {}
+    constructor(address initialOwner) Ownable(initialOwner) {}
 
     function createJob(
         address _employer,
