@@ -13,67 +13,30 @@ contract JobFactory is Ownable, ReentrancyGuard {
     uint256 public constant PLATFORM_FEE_BPS = 75;
     address payable public feeRecipient;
 
-    /// @notice All jobs ever created
-    address[] public allJobs;
-    /// @notice Jobs mapped by employer address
-    mapping(address => address[]) public jobsByEmployer;
-
-    /// @param _feeRecipient where fees will accrue
-    constructor(address payable _feeRecipient)
-        Ownable(msg.sender)
-    {
+    constructor(address payable _feeRecipient) {
         require(_feeRecipient != address(0), "Bad fee recipient");
         feeRecipient = _feeRecipient;
     }
 
-    /// @notice Update where platform fees accrue
-    function setFeeRecipient(address payable _receiver) external onlyOwner {
-        require(_receiver != address(0), "Bad address");
-        feeRecipient = _receiver;
-    }
-
-    /** @notice Create a new job
-      * @dev Employer must include locked funds + platform fee
-      */
+    /// @notice Create a new ProofOfWorkJob
     function createJob(
-        uint8 payType,
-        uint256 weeklyPay,
-        uint256 durationWeeks,
-        uint256 totalPay,
-        string calldata title,
-        string calldata description,
-        uint256 numPositions
-    )
-        external
-        payable
-        nonReentrant
-        returns (address)
-    {
-        // Calculate lock and fee
-        uint256 lockAmount = payType == 0 ? weeklyPay * durationWeeks : totalPay;
-        uint256 fee = (lockAmount * PLATFORM_FEE_BPS) / 10000;
-        require(msg.value == lockAmount + fee, "Incorrect funds + fee");
-
-        // Transfer platform fee
-        (bool sent,) = feeRecipient.call{value: fee}("");
-        require(sent, "Fee transfer failed");
-
-        // Deploy job with lockAmount
-        ProofOfWorkJob job = new ProofOfWorkJob{value: lockAmount}(
-            msg.sender,
-            payType,
-            weeklyPay,
-            durationWeeks,
-            totalPay,
-            title,
-            description,
-            numPositions
+        uint256 minStake,
+        uint256 duration,
+        uint256 reward,
+        address payable worker,
+        address payable employer
+    ) external nonReentrant onlyOwner returns (address) {
+        ProofOfWorkJob job = new ProofOfWorkJob(
+            minStake,
+            duration,
+            reward,
+            worker,
+            employer,
+            feeRecipient
         );
         address jobAddr = address(job);
-
-        allJobs.push(jobAddr);
         jobsByEmployer[msg.sender].push(jobAddr);
-
+        allJobs.push(jobAddr);
         emit JobCreated(jobAddr, msg.sender);
         return jobAddr;
     }
@@ -87,4 +50,8 @@ contract JobFactory is Ownable, ReentrancyGuard {
     function getJobsByEmployer(address employer) external view returns (address[] memory) {
         return jobsByEmployer[employer];
     }
+
+    // Internal storage
+    address[] internal allJobs;
+    mapping(address => address[]) internal jobsByEmployer;
 }
