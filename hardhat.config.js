@@ -8,7 +8,7 @@ if (!KASPA_TESTNET_RPC || !PRIVATE_KEY || !BLOCKSCOUT_API_KEY) {
 }
 
 module.exports = {
-  solidity: "0.8.17",
+  solidity: "0.8.20",
   defaultNetwork: "kaspaTestnet",
   networks: {
     kaspaTestnet: {
