@@ -15,12 +15,12 @@ async function main() {
     const estimatedGas = await deployer.estimateGas(deployTx);
     console.log("Estimated gas:", estimatedGas.toString());
 
-    const factory = await Factory.deploy(deployer.address);
-    const tx = factory.deploymentTransaction();
-    console.log("Deployment TX hash:", tx.hash);
+    // Manually send raw deployment transaction
+    const sentTx = await deployer.sendTransaction(deployTx);
+    console.log("Sent raw TX:", sentTx.hash);
 
-    await factory.waitForDeployment();
-    console.log("JobFactory deployed at:", factory.target);
+    const receipt = await sentTx.wait();
+    console.log("Deployment receipt:", receipt);
   } catch (err) {
     console.error("❌ Error during deployment:", err);
   }
