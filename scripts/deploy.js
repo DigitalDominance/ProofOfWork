@@ -11,11 +11,14 @@ async function main() {
   console.log("Contract factory loaded:", Factory.interface.fragments.map(f => f.name || f.type));
 
   try {
-    const deployTx = Factory.getDeployTransaction(deployer.address);
+    const deployTx = await Factory.getDeployTransaction(deployer.address);
+    console.log("Raw deploy TX:", deployTx);
+
     const estimatedGas = await deployer.estimateGas(deployTx);
     console.log("Estimated gas:", estimatedGas.toString());
 
-    // Manually send raw deployment transaction
+    deployTx.gasLimit = estimatedGas;
+
     const sentTx = await deployer.sendTransaction(deployTx);
     console.log("Sent raw TX:", sentTx.hash);
 
