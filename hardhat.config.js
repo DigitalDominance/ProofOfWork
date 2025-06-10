@@ -1,4 +1,3 @@
-```js
 require("dotenv").config();
 require("@nomicfoundation/hardhat-ethers");
 require("@nomicfoundation/hardhat-verify");
@@ -6,13 +5,13 @@ require("@nomicfoundation/hardhat-verify");
 const { KASPA_TESTNET_RPC, PRIVATE_KEY, BLOCKSCOUT_API_KEY } = process.env;
 
 if (!KASPA_TESTNET_RPC) {
-  throw new Error("❌  Please set KASPA_TESTNET_RPC in your .env");
+  throw new Error("❌ Please set KASPA_TESTNET_RPC in your .env");
 }
 if (!PRIVATE_KEY) {
-  throw new Error("❌  Please set PRIVATE_KEY in your .env");
+  throw new Error("❌ Please set PRIVATE_KEY in your .env");
 }
 if (!BLOCKSCOUT_API_KEY) {
-  throw new Error("❌  Please set BLOCKSCOUT_API_KEY (any non-empty value) in your .env");
+  throw new Error("❌ Please set BLOCKSCOUT_API_KEY in your .env");
 }
 
 module.exports = {
@@ -58,4 +57,3 @@ module.exports = {
     enabled: false
   }
 };
-```
