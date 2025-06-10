@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.20;
 
 interface IZKVerifier {
     function verifyProof(bytes calldata proof, uint256[] calldata pubSignals) external view returns (bool);
