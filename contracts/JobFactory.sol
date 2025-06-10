@@ -7,7 +7,7 @@ import "./ProofOfWorkJob.sol";
 contract JobFactory is ReentrancyGuard {
     address public admin;
     address payable public feeRecipient = payable(0xA0c5048c32870bB66d0BE861643cD6Bb5F66Ada2);
-    address[] public allJobs;
+    address[] internal allJobs;
 
     event JobCreated(address indexed jobAddress, address indexed employer);
 
@@ -33,11 +33,9 @@ contract JobFactory is ReentrancyGuard {
         uint256 fee = (_totalPay * 75) / 10000;
         require(msg.value == _totalPay + fee, "Incorrect payment");
 
-        // Forward the fee
         (bool sent, ) = feeRecipient.call{value: fee}("");
         require(sent, "Fee payment failed");
 
-        // Deploy the job with only the totalPay value
         ProofOfWorkJob job = (new ProofOfWorkJob){value: _totalPay}(
             _employer,
             _payType,
@@ -52,5 +50,9 @@ contract JobFactory is ReentrancyGuard {
         allJobs.push(address(job));
         emit JobCreated(address(job), _employer);
         return address(job);
+    }
+
+    function getAllJobs() external view returns (address[] memory) {
+        return allJobs;
     }
 }
