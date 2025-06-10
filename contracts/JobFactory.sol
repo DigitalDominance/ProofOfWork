@@ -7,7 +7,7 @@ import "./ProofOfWorkJob.sol";
 contract JobFactory is ReentrancyGuard {
     address public admin;
     address payable public feeRecipient = payable(0xA0c5048c32870bB66d0BE861643cD6Bb5F66Ada2);
-    address[] internal allJobs;
+    address[] public allJobs;
 
     event JobCreated(address indexed jobAddress, address indexed employer);
 
