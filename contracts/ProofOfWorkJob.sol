@@ -5,7 +5,6 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./ReputationSystem.sol";
 import "./DisputeDAO.sol";
 
-/// @notice One job instance managing funds, assignments, payouts, and juror disputes
 contract ProofOfWorkJob is ReentrancyGuard {
     enum PayType { WEEKLY, ONE_OFF }
 
@@ -55,7 +54,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
         uint256 _totalPay,
         string memory _title,
         string memory _description,
-        uint256 _positions
+        uint256 _positions,
+        address _disputeDAO
     ) payable {
         employer = _employer;
         payType = PayType(_payType);
@@ -70,7 +70,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         description = _description;
 
         reputation = new ReputationSystem(address(this));
-        disputeDAO = new DisputeDAO(address(this));
+        disputeDAO = DisputeDAO(_disputeDAO);
     }
 
     function assignWorker(address worker) external onlyEmployer {
