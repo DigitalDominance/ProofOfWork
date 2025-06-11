@@ -130,7 +130,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function openDispute() external {
-        uint256 id = disputeDAO.createDispute(address(this), 0);
+        uint256 id = disputeDAO.createDispute(address(this));
         emit DisputeOpened(msg.sender, id);
     }
 
