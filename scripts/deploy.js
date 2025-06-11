@@ -5,7 +5,7 @@ async function main() {
   console.log("Deploying with:", deployer.address);
 
   const balance = await deployer.provider.getBalance(deployer.address);
-  console.log("Deployer balance (ETH):", hre.ethers.utils.formatEther(balance));
+  console.log("Deployer balance (ETH):", hre.ethers.formatEther(balance));
 
   const disputeDAOAddress = "0x75f4C820A90eE9d87A2F3282d67d20CcE28876F8"; // pre-deployed DAO
 
