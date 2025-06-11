@@ -133,16 +133,4 @@ contract ProofOfWorkJob is ReentrancyGuard {
         uint256 id = disputeDAO.createDispute(address(this));
         emit DisputeOpened(msg.sender, id);
     }
-
-    function addJuror(address juror) external onlyAdmin {
-        disputeDAO.addJuror(juror);
-    }
-
-    function removeJuror(address juror) external onlyAdmin {
-        disputeDAO.removeJuror(juror);
-    }
-
-    function getJurors() external view returns (address[] memory) {
-        return disputeDAO.getJurors();
-    }
 }
