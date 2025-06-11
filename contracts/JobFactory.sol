@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./ProofOfWorkJob.sol";
+import "./DisputeDAO.sol";
 
 contract JobFactory is ReentrancyGuard {
     address public admin;
@@ -16,7 +17,8 @@ contract JobFactory is ReentrancyGuard {
         _;
     }
 
-    constructor(address _admin) {
+    constructor(address _admin, address _disputeDAO) {
+        disputeDAO = DisputeDAO(_disputeDAO);
         admin = _admin;
     }
 
@@ -44,7 +46,8 @@ contract JobFactory is ReentrancyGuard {
             _totalPay,
             _title,
             _description,
-            _positions
+            _positions,
+            disputeDAO
         );
 
         allJobs.push(address(job));
