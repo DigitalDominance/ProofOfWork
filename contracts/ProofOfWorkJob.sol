@@ -49,6 +49,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
 
     constructor(
         address _employer,
+        address _disputeDAO,
         uint8 _payType,
         uint256 _weeklyPay,
         uint256 _durationWeeks,
@@ -70,7 +71,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         description = _description;
 
         reputation = new ReputationSystem(address(this));
-        disputeDAO = new DisputeDAO(address(this));
+        disputeDAO = DisputeDAO(_disputeDAO);
     }
 
     function assignWorker(address worker) external onlyEmployer {

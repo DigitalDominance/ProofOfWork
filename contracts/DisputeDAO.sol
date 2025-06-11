@@ -29,13 +29,18 @@ contract DisputeDAO is Ownable, ReentrancyGuard {
     event DisputeResolved(uint256 indexed id, bool outcome);
     event MessagePosted(uint256 indexed id, address indexed sender, string message);
 
+
     constructor(address initialOwner) Ownable(initialOwner) {
-        address juror1 = 0xfF817442F4Cc914b0338F197c4c0EfFe2E2707C9;
-        address juror2 = 0xA0c5048c32870bB66d0BE861643cD6Bb5F66Ada2;
-        jurors.push(juror1);
-        jurors.push(juror2);
-        isJuror[juror1] = true;
-        isJuror[juror2] = true;
+        address[2] memory initialJurors = [
+            0xfF817442F4Cc914b0338F197c4c0EfFe2E2707C9,
+            0xA0c5048c32870bB66d0BE861643cD6Bb5F66Ada2
+        ];
+        for (uint i = 0; i < initialJurors.length; i++) {
+            address juror = initialJurors[i];
+            isJuror[juror] = true;
+            jurors.push(juror);
+            emit JurorAdded(juror);
+        }
     }
 
     function getJurors() external view returns (address[] memory) {
