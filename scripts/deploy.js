@@ -7,26 +7,17 @@ async function main() {
   const balance = await deployer.provider.getBalance(deployer.address);
   console.log("Deployer balance (ETH):", hre.ethers.formatEther(balance));
 
-  const Factory = await hre.ethers.getContractFactory("JobFactory");
-  console.log("Contract factory loaded:", Factory.interface.fragments.map(f => f.name || f.type));
+  // Deploy DisputeDAO
+  const DisputeDAOFactory = await hre.ethers.getContractFactory("DisputeDAO");
+  const disputeDAO = await DisputeDAOFactory.deploy(deployer.address);
+  await disputeDAO.waitForDeployment();
+  console.log("✅ DisputeDAO deployed at:", disputeDAO.target);
 
-  try {
-    const deployTx = await Factory.getDeployTransaction(deployer.address);
-    console.log("Raw deploy TX:", deployTx);
-
-    const estimatedGas = await deployer.estimateGas(deployTx);
-    console.log("Estimated gas:", estimatedGas.toString());
-
-    deployTx.gasLimit = estimatedGas;
-
-    const sentTx = await deployer.sendTransaction(deployTx);
-    console.log("Sent raw TX:", sentTx.hash);
-
-    const receipt = await sentTx.wait();
-    console.log("Deployment receipt:", receipt);
-  } catch (err) {
-    console.error("❌ Error during deployment:", err);
-  }
+  // Deploy JobFactory with DisputeDAO address
+  const JobFactoryFactory = await hre.ethers.getContractFactory("JobFactory");
+  const jobFactory = await JobFactoryFactory.deploy(deployer.address, disputeDAO.target);
+  await jobFactory.waitForDeployment();
+  console.log("✅ JobFactory deployed at:", jobFactory.target);
 }
 
 main()
