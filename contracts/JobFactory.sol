@@ -7,6 +7,7 @@ import "./DisputeDAO.sol";
 
 contract JobFactory is ReentrancyGuard {
     address public admin;
+    DisputeDAO public disputeDAO;
     address payable public feeRecipient = payable(0xA0c5048c32870bB66d0BE861643cD6Bb5F66Ada2);
     address[] internal allJobs;
 
