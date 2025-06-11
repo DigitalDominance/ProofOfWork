@@ -27,7 +27,15 @@ if (!BLOCKSCOUT_API_KEY) {
 }
 
 module.exports = {
-  solidity: "0.8.20",   // ← same as your old config
+  solidity: {
+    version: "0.8.20",
+    settings: {
+      optimizer: {
+        enabled: true,
+        runs: 50
+      }
+    }
+  },   // ← same as your old config
 
   networks: {
     kaspaTestnet: {
