@@ -1,26 +1,20 @@
-const hre = require("hardhat");
+const { ethers } = require("hardhat");
 
 async function main() {
-  const [deployer] = await hre.ethers.getSigners();
-  console.log("Deploying with:", deployer.address);
+    const [deployer] = await ethers.getSigners();
+    console.log("Deploying with:", deployer.address);
 
-  const balance = await deployer.provider.getBalance(deployer.address);
-  console.log("Deployer balance (ETH):", hre.ethers.formatEther(balance));
+    const balance = await deployer.getBalance();
+    console.log("Deployer balance (ETH):", ethers.utils.formatEther(balance));
 
-  // Deploy DisputeDAO first
-  const DisputeDAOFactory = await hre.ethers.getContractFactory("DisputeDAO");
-  const disputeDAO = await DisputeDAOFactory.deploy(deployer.address);
-  await disputeDAO.waitForDeployment();
-  console.log("✅ DisputeDAO deployed at:", await disputeDAO.getAddress());
-
-  // Deploy JobFactory with deployer as admin
-  const Factory = await hre.ethers.getContractFactory("JobFactory");
-  const jobFactory = await Factory.deploy(deployer.address);
-  await jobFactory.waitForDeployment();
-  console.log("✅ JobFactory deployed at:", await jobFactory.getAddress());
+    const factoryFactory = await ethers.getContractFactory("JobFactory");
+    const disputeDAOAddress = "0x75f4C820A90eE9d87A2F3282d67d20CcE28876F8";
+    const factory = await factoryFactory.deploy(deployer.address, disputeDAOAddress);
+    await factory.deployed();
+    console.log("✅ JobFactory deployed at:", factory.address);
 }
 
 main().catch((error) => {
-  console.error("❌ Unhandled error:", error);
-  process.exitCode = 1;
+    console.error("❌ Unhandled error:", error);
+    process.exitCode = 1;
 });
