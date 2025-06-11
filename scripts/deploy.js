@@ -4,7 +4,7 @@ async function main() {
     const [deployer] = await ethers.getSigners();
     console.log("Deploying with:", deployer.address);
 
-    const balance = await deployer.getBalance();
+    const balance = await ethers.provider.getBalance(deployer.address);
     console.log("Deployer balance (ETH):", ethers.utils.formatEther(balance));
 
     const factoryFactory = await ethers.getContractFactory("JobFactory");
