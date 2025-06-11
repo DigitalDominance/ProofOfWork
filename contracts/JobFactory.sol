@@ -7,8 +7,7 @@ import "./ProofOfWorkJob.sol";
 contract JobFactory is ReentrancyGuard {
     address public admin;
     address payable public feeRecipient = payable(0xA0c5048c32870bB66d0BE861643cD6Bb5F66Ada2);
-    address public disputeDAOAddress;
-    address[] public allJobs;
+    address[] internal allJobs;
 
     event JobCreated(address indexed jobAddress, address indexed employer);
 
@@ -17,9 +16,8 @@ contract JobFactory is ReentrancyGuard {
         _;
     }
 
-    constructor(address _admin, address _disputeDAO) {
+    constructor(address _admin) {
         admin = _admin;
-        disputeDAOAddress = _disputeDAO;
     }
 
     function createJob(
@@ -46,8 +44,7 @@ contract JobFactory is ReentrancyGuard {
             _totalPay,
             _title,
             _description,
-            _positions,
-            disputeDAOAddress
+            _positions
         );
 
         allJobs.push(address(job));
