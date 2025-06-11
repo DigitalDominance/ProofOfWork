@@ -7,22 +7,20 @@ async function main() {
   const balance = await deployer.provider.getBalance(deployer.address);
   console.log("Deployer balance (ETH):", hre.ethers.formatEther(balance));
 
-  // Deploy DisputeDAO
+  // Deploy DisputeDAO first
   const DisputeDAOFactory = await hre.ethers.getContractFactory("DisputeDAO");
   const disputeDAO = await DisputeDAOFactory.deploy(deployer.address);
   await disputeDAO.waitForDeployment();
-  console.log("✅ DisputeDAO deployed at:", disputeDAO.target);
+  console.log("✅ DisputeDAO deployed at:", await disputeDAO.getAddress());
 
-  // Deploy JobFactory with DisputeDAO address
-  const JobFactoryFactory = await hre.ethers.getContractFactory("JobFactory");
-  const jobFactory = await JobFactoryFactory.deploy(deployer.address, disputeDAO.target);
+  // Deploy JobFactory with deployer as admin
+  const Factory = await hre.ethers.getContractFactory("JobFactory");
+  const jobFactory = await Factory.deploy(deployer.address);
   await jobFactory.waitForDeployment();
-  console.log("✅ JobFactory deployed at:", jobFactory.target);
+  console.log("✅ JobFactory deployed at:", await jobFactory.getAddress());
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch(err => {
-    console.error("❌ Unhandled error:", err);
-    process.exit(1);
-  });
+main().catch((error) => {
+  console.error("❌ Unhandled error:", error);
+  process.exitCode = 1;
+});
