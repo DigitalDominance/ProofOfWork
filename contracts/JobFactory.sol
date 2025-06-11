@@ -3,60 +3,48 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./ProofOfWorkJob.sol";
-import "./DisputeDAO.sol";
+
+interface IDisputeDAO {
+    function createDispute(address job) external returns (uint256);
+}
 
 contract JobFactory is ReentrancyGuard {
-    address public admin;
-    DisputeDAO public disputeDAO;
-    address payable public feeRecipient = payable(0xA0c5048c32870bB66d0BE861643cD6Bb5F66Ada2);
-    address[] internal allJobs;
+    address payable public platformWallet;
+    IDisputeDAO public disputeDAO;
 
     event JobCreated(address indexed jobAddress, address indexed employer);
 
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "Not admin");
-        _;
-    }
-
-    constructor(address _admin, address _disputeDAO) {
-        disputeDAO = DisputeDAO(_disputeDAO);
-        admin = _admin;
+    constructor(address _platformWallet, address _disputeDAO) {
+        platformWallet = payable(_platformWallet);
+        disputeDAO = IDisputeDAO(_disputeDAO);
     }
 
     function createJob(
-        address _employer,
-        uint8 _payType,
-        uint256 _weeklyPay,
-        uint256 _durationWeeks,
+        address payable _employee,
         uint256 _totalPay,
-        string memory _title,
-        string memory _description,
-        uint256 _positions
-    ) external payable returns (address) {
-        uint256 fee = (_totalPay * 75) / 10000;
-        require(msg.value == _totalPay + fee, "Incorrect payment");
-
-        (bool sent, ) = feeRecipient.call{value: fee}("");
-        require(sent, "Fee payment failed");
+        uint256 _duration,
+        uint256 _milestoneCount,
+        string calldata _title,
+        string calldata _description,
+        string calldata _requirements,
+        string calldata _category
+    ) external payable nonReentrant returns (address) {
+        require(msg.value == _totalPay, "Incorrect payment");
 
         ProofOfWorkJob job = (new ProofOfWorkJob){value: _totalPay}(
-            _employer,
-            _payType,
-            _weeklyPay,
-            _durationWeeks,
+            payable(msg.sender),
+            _employee,
             _totalPay,
+            _duration,
+            _milestoneCount,
             _title,
             _description,
-            _positions,
-            disputeDAO
+            _requirements,
+            _category,
+            address(disputeDAO)
         );
 
-        allJobs.push(address(job));
-        emit JobCreated(address(job), _employer);
+        emit JobCreated(address(job), msg.sender);
         return address(job);
-    }
-
-    function getAllJobs() external view returns (address[] memory) {
-        return allJobs;
     }
 }
