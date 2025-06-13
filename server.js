@@ -36,15 +36,15 @@ mongoose.connection.once("open", () =>
 );
 
 // ─── Mongoose Models ──────────────────────────────────────────────────────────
-// User model
+// POWUser model
 const userSchema = new mongoose.Schema({
   wallet: { type: String, unique: true, required: true },
   displayName: { type: String, required: true, immutable: true },
   createdAt: { type: Date, default: Date.now },
 });
-const User = mongoose.model("User", userSchema);
+const POWUser = mongoose.model("POWUser", userSchema);
 
-// Message model (dispute messaging)
+// POWMessage model (dispute messaging)
 const messageSchema = new mongoose.Schema({
   disputeId: { type: Number, required: true, index: true },
   sender: { type: String, required: true },
@@ -56,7 +56,7 @@ messageSchema.index(
   { createdAt: 1 },
   { expireAfterSeconds: 14 * 24 * 3600 }
 );
-const Message = mongoose.model("Message", messageSchema);
+const POWMessage = mongoose.model("POWMessage", messageSchema);
 
 // ─── Auth Helpers ─────────────────────────────────────────────────────────────
 // In-memory challenge store: { [wallet]: { msg, expires } }
@@ -96,11 +96,11 @@ app.post("/api/auth/verify", async (req, res) => {
     });
 
     // Create user if not exists (first‐time set displayName)
-    let user = await User.findOne({ wallet });
+    let user = await POWUser.findOne({ wallet });
     if (!user) {
       if (!displayName)
         return res.status(400).json({ error: "displayName required" });
-      user = await User.create({ wallet, displayName });
+      user = await POWUser.create({ wallet, displayName });
     }
 
     res.json({ token });
@@ -128,13 +128,13 @@ function requireAuth(req, res, next) {
 // ─── User Endpoints ────────────────────────────────────────────────────────────
 // Get user by wallet
 app.get("/api/users/:wallet", async (req, res) => {
-  const user = await User.findOne({ wallet: req.params.wallet });
+  const user = await POWUser.findOne({ wallet: req.params.wallet });
   if (!user) return res.status(404).json({ error: "Not found" });
   res.json(user);
 });
 // Check if exists
 app.head("/api/users/:wallet", async (req, res) => {
-  const exists = await User.exists({ wallet: req.params.wallet });
+  const exists = await POWUser.exists({ wallet: req.params.wallet });
   res.sendStatus(exists ? 200 : 404);
 });
 
@@ -145,7 +145,7 @@ app.post("/api/messages", requireAuth, async (req, res) => {
   if (disputeId == null || !content)
     return res.status(400).json({ error: "Missing fields" });
 
-  const msg = await Message.create({
+  const msg = await POWMessage.create({
     disputeId,
     sender: req.user.wallet,
     content,
@@ -159,7 +159,7 @@ app.post("/api/messages", requireAuth, async (req, res) => {
 app.get("/api/messages/:disputeId", requireAuth, async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 50;
-  const msgs = await Message.find({ disputeId: req.params.disputeId })
+  const msgs = await POWMessage.find({ disputeId: req.params.disputeId })
     .sort({ createdAt: 1 })
     .skip((page - 1) * limit)
     .limit(limit);
