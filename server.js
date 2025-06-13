@@ -26,10 +26,8 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // ─── MongoDB Connection ────────────────────────────────────────────────────────
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+// remove deprecated options
+mongoose.connect(process.env.MONGO_URI);
 mongoose.connection.on("error", (err) => console.error("MongoDB error:", err));
 mongoose.connection.once("open", () =>
   console.log("✅ MongoDB connected")
@@ -49,7 +47,7 @@ const messageSchema = new mongoose.Schema({
   disputeId: { type: Number, required: true, index: true },
   sender: { type: String, required: true },
   content: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now, index: true },
+  createdAt: { type: Date, default: Date.now }, // removed index: true here
 });
 // TTL index: expire 14 days after creation
 messageSchema.index(
@@ -95,7 +93,7 @@ app.post("/api/auth/verify", async (req, res) => {
       expiresIn: "1h",
     });
 
-    // Create user if not exists (first‐time set displayName)
+    // Create user if not exists (first-time set displayName)
     let user = await POWUser.findOne({ wallet });
     if (!user) {
       if (!displayName)
