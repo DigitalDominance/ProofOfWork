@@ -30,7 +30,8 @@ contract JobFactory is ReentrancyGuard {
         uint256 _totalPay,
         string memory _title,
         string memory _description,
-        uint256 _positions
+        uint256 _positions,
+        string[] memory _tags  // Add tags parameter
     ) external payable returns (address) {
         uint256 fee = (_totalPay * 75) / 10000;
         require(msg.value == _totalPay + fee, "Incorrect payment");
@@ -47,7 +48,8 @@ contract JobFactory is ReentrancyGuard {
             _title,
             _description,
             _positions,
-            disputeDAOAddress
+            disputeDAOAddress,
+            _tags
         );
 
         allJobs.push(address(job));
