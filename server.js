@@ -26,7 +26,6 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // ─── MongoDB Connection ────────────────────────────────────────────────────────
-// remove deprecated options
 mongoose.connect(process.env.MONGO_URI);
 mongoose.connection.on("error", (err) => console.error("MongoDB error:", err));
 mongoose.connection.once("open", () =>
@@ -34,22 +33,36 @@ mongoose.connection.once("open", () =>
 );
 
 // ─── Mongoose Models ──────────────────────────────────────────────────────────
-// POWUser model
+// POWUser model (with role)
 const userSchema = new mongoose.Schema({
-  wallet: { type: String, unique: true, required: true },
-  displayName: { type: String, required: true, immutable: true },
-  createdAt: { type: Date, default: Date.now },
+  wallet:       { type: String, unique: true, required: true },
+  displayName:  { type: String, required: true, immutable: true },
+  role:         { type: String, enum: ["employer","worker"], required: true },
+  createdAt:    { type: Date, default: Date.now },
 });
 const POWUser = mongoose.model("POWUser", userSchema);
 
+// POWJob model
+const jobSchema = new mongoose.Schema({
+  paymentType:     { type: String, enum: ["WEEKLY","ONE_OFF"], required: true },
+  jobName:         { type: String, required: true },
+  jobDescription:  { type: String, required: true },
+  jobTags:         { type: [String], default: [] },
+  employerAddress: { type: String, required: true },
+  employeeAddress: { type: String, default: null },
+  status:          { type: String, enum: ["OPEN","IN_PROGRESS","FINISHED"], default: "OPEN" },
+  createdAt:       { type: Date, default: Date.now },
+});
+const POWJob = mongoose.model("POWJob", jobSchema);
+
 // POWMessage model (dispute messaging)
 const messageSchema = new mongoose.Schema({
-  disputeId: { type: Number, required: true, index: true },
-  sender: { type: String, required: true },
-  content: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now }, // removed index: true here
+  disputeId:  { type: Number, required: true, index: true },
+  sender:     { type: String, required: true },
+  content:    { type: String, required: true },
+  createdAt:  { type: Date, default: Date.now },
 });
-// TTL index: expire 14 days after creation
+// TTL index: expire after 14 days
 messageSchema.index(
   { createdAt: 1 },
   { expireAfterSeconds: 14 * 24 * 3600 }
@@ -57,18 +70,15 @@ messageSchema.index(
 const POWMessage = mongoose.model("POWMessage", messageSchema);
 
 // ─── Auth Helpers ─────────────────────────────────────────────────────────────
-// In-memory challenge store: { [wallet]: { msg, expires } }
+// In-memory challenge store
 const challenges = new Map();
 
 // 1. Request a challenge
 app.post("/api/auth/challenge", (req, res) => {
   const { wallet } = req.body;
   if (!wallet) return res.status(400).json({ error: "Wallet required" });
-
   const challenge = `ProofOfWork login: ${Date.now()}|${Math.random()}`;
-  const expires =
-    Date.now() + (parseInt(process.env.CHALLENGE_EXPIRY_MIN) || 10) * 60_000;
-
+  const expires  = Date.now() + (parseInt(process.env.CHALLENGE_EXPIRY_MIN)||10)*60_000;
   challenges.set(wallet.toLowerCase(), { challenge, expires });
   res.json({ challenge });
 });
@@ -76,9 +86,9 @@ app.post("/api/auth/challenge", (req, res) => {
 // 2. Verify signature → issue JWT
 app.post("/api/auth/verify", async (req, res) => {
   try {
-    const { wallet, signature, displayName } = req.body;
-    if (!wallet || !signature)
-      return res.status(400).json({ error: "Missing params" });
+    const { wallet, signature, displayName, role } = req.body;
+    if (!wallet || !signature) 
+      return res.status(400).json({ error: "Missing wallet or signature" });
 
     const record = challenges.get(wallet.toLowerCase());
     if (!record || record.expires < Date.now())
@@ -89,16 +99,14 @@ app.post("/api/auth/verify", async (req, res) => {
       throw new Error("Invalid signature");
 
     // Issue JWT
-    const token = jwt.sign({ wallet }, process.env.JWT_SECRET, {
-      expiresIn: "1h",
-    });
+    const token = jwt.sign({ wallet }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
-    // Create user if not exists (first-time set displayName)
+    // Create user if new (require displayName & role)
     let user = await POWUser.findOne({ wallet });
     if (!user) {
-      if (!displayName)
-        return res.status(400).json({ error: "displayName required" });
-      user = await POWUser.create({ wallet, displayName });
+      if (!displayName || !role)
+        return res.status(400).json({ error: "displayName and role required" });
+      user = await POWUser.create({ wallet, displayName, role });
     }
 
     res.json({ token });
@@ -113,7 +121,6 @@ function requireAuth(req, res, next) {
   const auth = req.headers.authorization?.split(" ");
   if (auth?.[0] !== "Bearer" || !auth[1])
     return res.status(401).json({ error: "Missing token" });
-
   try {
     const payload = jwt.verify(auth[1], process.env.JWT_SECRET);
     req.user = payload; // { wallet }
@@ -136,6 +143,67 @@ app.head("/api/users/:wallet", async (req, res) => {
   res.sendStatus(exists ? 200 : 404);
 });
 
+// ─── Job Endpoints ─────────────────────────────────────────────────────────────
+// Create a new job (employers only)
+app.post("/api/jobs", requireAuth, async (req, res) => {
+  const user = await POWUser.findOne({ wallet: req.user.wallet });
+  if (!user || user.role !== "employer")
+    return res.status(403).json({ error: "Only employers can create jobs" });
+
+  const { paymentType, jobName, jobDescription, jobTags } = req.body;
+  if (!paymentType || !jobName || !jobDescription)
+    return res.status(400).json({ error: "Missing required fields" });
+
+  const job = await POWJob.create({
+    paymentType,
+    jobName,
+    jobDescription,
+    jobTags: jobTags||[],
+    employerAddress: user.wallet
+  });
+
+  res.status(201).json(job);
+});
+
+// Update a job: assign employee or finish
+app.put("/api/jobs/:jobId", requireAuth, async (req, res) => {
+  const user = await POWUser.findOne({ wallet: req.user.wallet });
+  if (!user) return res.status(403).json({ error: "Invalid user" });
+
+  const job = await POWJob.findById(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+
+  // Only employer can assign employee
+  if (req.body.employeeAddress) {
+    if (user.role !== "employer" || job.employerAddress !== user.wallet)
+      return res.status(403).json({ error: "Not authorized to assign" });
+    job.employeeAddress = req.body.employeeAddress;
+    job.status = "IN_PROGRESS";
+  }
+  // Only assigned employee can mark finished
+  if (req.body.finish === true) {
+    if (user.role !== "worker" || job.employeeAddress !== user.wallet)
+      return res.status(403).json({ error: "Not authorized to finish" });
+    job.status = "FINISHED";
+  }
+
+  await job.save();
+  res.json(job);
+});
+
+// List all jobs (public)
+app.get("/api/jobs", async (req, res) => {
+  const jobs = await POWJob.find();
+  res.json(jobs);
+});
+
+// Get single job
+app.get("/api/jobs/:jobId", async (req, res) => {
+  const job = await POWJob.findById(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Not found" });
+  res.json(job);
+});
+
 // ─── Dispute Messaging Endpoints ──────────────────────────────────────────────
 // Post a new message
 app.post("/api/messages", requireAuth, async (req, res) => {
@@ -148,12 +216,11 @@ app.post("/api/messages", requireAuth, async (req, res) => {
     sender: req.user.wallet,
     content,
   });
-  // Emit to WebSocket room
   io.to(`dispute_${disputeId}`).emit("newMessage", msg);
   res.json(msg);
 });
 
-// Get messages for a dispute (paginated)
+// Get messages for a dispute
 app.get("/api/messages/:disputeId", requireAuth, async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 50;
@@ -167,13 +234,9 @@ app.get("/api/messages/:disputeId", requireAuth, async (req, res) => {
 // ─── WebSockets ────────────────────────────────────────────────────────────────
 io.on("connection", (socket) => {
   console.log("WS connected:", socket.id);
-
-  // Join a dispute room to get live updates
   socket.on("joinRoom", (disputeId) => {
     socket.join(`dispute_${disputeId}`);
   });
-
-  // Optionally handle direct WS messages from client
   socket.on("sendMessage", (msg) => {
     if (msg.disputeId && msg.content && msg.sender) {
       io.to(`dispute_${msg.disputeId}`).emit("newMessage", msg);
@@ -182,9 +245,7 @@ io.on("connection", (socket) => {
 });
 
 // ─── Healthcheck & Start ──────────────────────────────────────────────────────
-app.get("/", (req, res) => {
-  res.send("🔥 ProofOfWork API is live!");
-});
+app.get("/", (req, res) => res.send("🔥 ProofOfWork API is live!"));
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`🌐 Listening on port ${PORT}`));
