@@ -21,7 +21,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
     string public title;
     string public description;
 
-    string public [] tags;
+    string[] public tags;
 
     ReputationSystem public reputation;
     DisputeDAO public disputeDAO;
