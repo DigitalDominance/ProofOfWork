@@ -21,6 +21,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
     string public title;
     string public description;
 
+    string public [] tags;
+
     ReputationSystem public reputation;
     DisputeDAO public disputeDAO;
 
@@ -55,7 +57,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
         string memory _title,
         string memory _description,
         uint256 _positions,
-        address _disputeDAO
+        address _disputeDAO,
+        string[] memory _tags  // Add this new parameter
     ) payable {
         employer = _employer;
         payType = PayType(_payType);
@@ -68,6 +71,11 @@ contract ProofOfWorkJob is ReentrancyGuard {
 
         title = _title;
         description = _description;
+
+        // Add tags from constructor parameter
+        for (uint i = 0; i < _tags.length; i++) {
+            tags.push(_tags[i]);
+        }        
 
         reputation = new ReputationSystem(address(this));
         disputeDAO = DisputeDAO(_disputeDAO);
