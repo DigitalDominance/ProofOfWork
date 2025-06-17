@@ -26,12 +26,29 @@ contract ProofOfWorkJob is ReentrancyGuard {
     ReputationSystem public reputation;
     DisputeDAO public disputeDAO;
 
+    // Applicant structure
+    struct Applicant {
+        address applicantAddress;
+        string application;
+        uint256 appliedAt;
+        bool isActive; // To track if application is still valid
+    }
+
+    // Applicant mappings and arrays
+    address[] public applicantAddresses;
+    mapping(address => Applicant) public applicants;
+    mapping(address => bool) public hasApplied;
+
+    // Worker mappings (existing)
     address[] public assignedWorkers;
     mapping(address => bool) public isWorker;
     mapping(address => bool) public activeWorker;
 
     address public constant ADMIN = 0xA0c5048c32870bB66d0BE861643cD6Bb5F66Ada2;
 
+    // Events
+    event ApplicationSubmitted(address indexed applicant, string application);
+    event ApplicationWithdrawn(address indexed applicant);
     event WorkerAssigned(address indexed worker);
     event PaymentReleased(address indexed worker, uint256 amount);
     event OneOffPayment(address indexed worker, uint256 amount);
@@ -58,7 +75,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         string memory _description,
         uint256 _positions,
         address _disputeDAO,
-        string[] memory _tags  // Add this new parameter
+        string[] memory _tags
     ) payable {
         employer = _employer;
         payType = PayType(_payType);
@@ -81,7 +98,150 @@ contract ProofOfWorkJob is ReentrancyGuard {
         disputeDAO = DisputeDAO(_disputeDAO);
     }
 
+    // ==================== APPLICANT FUNCTIONS ====================
+
+    /**
+     * @dev Submit an application for the job
+     * @param _application The application text from the applicant
+     */
+    function submitApplication(string memory _application) external {
+        require(bytes(_application).length > 0, "Application cannot be empty");
+        require(!hasApplied[msg.sender], "Already applied");
+        require(!isWorker[msg.sender], "Already assigned as worker");
+        require(assignedWorkers.length < positions, "All positions filled");
+
+        // Create applicant struct
+        applicants[msg.sender] = Applicant({
+            applicantAddress: msg.sender,
+            application: _application,
+            appliedAt: block.timestamp,
+            isActive: true
+        });
+
+        hasApplied[msg.sender] = true;
+        applicantAddresses.push(msg.sender);
+
+        emit ApplicationSubmitted(msg.sender, _application);
+    }
+
+    /**
+     * @dev Withdraw an application (only by the applicant)
+     */
+    function withdrawApplication() external {
+        require(hasApplied[msg.sender], "No application found");
+        require(applicants[msg.sender].isActive, "Application already inactive");
+        require(!isWorker[msg.sender], "Already assigned as worker");
+
+        applicants[msg.sender].isActive = false;
+
+        emit ApplicationWithdrawn(msg.sender);
+    }
+
+    /**
+     * @dev Get all applicant addresses
+     */
+    function getAllApplicants() external view returns (address[] memory) {
+        return applicantAddresses;
+    }
+
+    /**
+     * @dev Get active applicants only
+     */
+    function getActiveApplicants() external view returns (address[] memory) {
+        uint256 activeCount = 0;
+        
+        // First pass: count active applicants
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            if (applicants[applicantAddresses[i]].isActive && !isWorker[applicantAddresses[i]]) {
+                activeCount++;
+            }
+        }
+
+        // Second pass: populate array
+        address[] memory activeApplicants = new address[](activeCount);
+        uint256 index = 0;
+        
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            address applicantAddr = applicantAddresses[i];
+            if (applicants[applicantAddr].isActive && !isWorker[applicantAddr]) {
+                activeApplicants[index] = applicantAddr;
+                index++;
+            }
+        }
+
+        return activeApplicants;
+    }
+
+    /**
+     * @dev Get applicant details by address
+     */
+    function getApplicant(address _applicant) external view returns (
+        address applicantAddress,
+        string memory application,
+        uint256 appliedAt,
+        bool isActive
+    ) {
+        require(hasApplied[_applicant], "No application found");
+        
+        Applicant memory applicant = applicants[_applicant];
+        return (
+            applicant.applicantAddress,
+            applicant.application,
+            applicant.appliedAt,
+            applicant.isActive
+        );
+    }
+
+    /**
+     * @dev Get total number of applications (including inactive)
+     */
+    function getTotalApplications() external view returns (uint256) {
+        return applicantAddresses.length;
+    }
+
+    /**
+     * @dev Get number of active applications
+     */
+    function getActiveApplicationsCount() external view returns (uint256) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            if (applicants[applicantAddresses[i]].isActive && !isWorker[applicantAddresses[i]]) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    // ==================== WORKER ASSIGNMENT FUNCTIONS ====================
+
+    /**
+     * @dev Assign a worker from applicants (only employer)
+     * @param worker The address of the applicant to assign as worker
+     */
     function assignWorker(address worker) external onlyEmployer {
+        require(worker != address(0), "Bad worker");
+        require(!isWorker[worker], "Already assigned");
+        require(assignedWorkers.length < positions, "Max positions filled");
+        
+        // Worker must have applied (optional check - you can remove if you want to assign anyone)
+        require(hasApplied[worker], "Must apply first");
+        require(applicants[worker].isActive, "Application not active");
+
+        isWorker[worker] = true;
+        activeWorker[worker] = true;
+        assignedWorkers.push(worker);
+
+        // Mark application as inactive since they're now assigned
+        applicants[worker].isActive = false;
+
+        emit WorkerAssigned(worker);
+    }
+
+    /**
+     * @dev Assign worker directly without requiring application (employer only)
+     * @param worker The address to assign as worker
+     */
+    function assignWorkerDirect(address worker) external onlyEmployer {
         require(worker != address(0), "Bad worker");
         require(!isWorker[worker], "Already assigned");
         require(assignedWorkers.length < positions, "Max positions filled");
@@ -90,8 +250,15 @@ contract ProofOfWorkJob is ReentrancyGuard {
         activeWorker[worker] = true;
         assignedWorkers.push(worker);
 
+        // If they had applied, mark application as inactive
+        if (hasApplied[worker]) {
+            applicants[worker].isActive = false;
+        }
+
         emit WorkerAssigned(worker);
     }
+
+    // ==================== EXISTING FUNCTIONS ====================
 
     function getAssignedWorkers() external view returns (address[] memory) {
         return assignedWorkers;
