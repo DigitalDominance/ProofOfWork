@@ -15,7 +15,7 @@ contract DisputeDAO is Ownable, ReentrancyGuard {
         bool resolved;
         uint256 votesFor;
         uint256 votesAgainst;
-        string[] messages;
+        string reason;
     }
 
     mapping(uint256 => Dispute) public disputes;
@@ -24,10 +24,9 @@ contract DisputeDAO is Ownable, ReentrancyGuard {
     address[] public jurors;
     mapping(address => bool) public isJuror;
 
-    event DisputeCreated(uint256 indexed id, address indexed job, address indexed by);
+    event DisputeCreated(uint256 indexed id, address indexed job, address indexed by, string reason);
     event Voted(uint256 indexed id, address indexed juror, bool support);
     event DisputeResolved(uint256 indexed id, bool outcome);
-    event MessagePosted(uint256 indexed id, address indexed sender, string message);
 
     constructor(address initialOwner) Ownable(initialOwner) {
         address juror1 = 0xfF817442F4Cc914b0338F197c4c0EfFe2E2707C9;
@@ -42,7 +41,9 @@ contract DisputeDAO is Ownable, ReentrancyGuard {
         return jurors;
     }
 
-    function createDispute(address job) external returns (uint256) {
+    function createDispute(address job, string calldata reason) external returns (uint256) {
+        require(bytes(reason).length > 0, "Reason cannot be empty");
+        
         address employer = IProofOfWorkJob(job).employer();
         require(msg.sender == employer || msg.sender == tx.origin, "Not authorized");
 
@@ -52,26 +53,10 @@ contract DisputeDAO is Ownable, ReentrancyGuard {
         d.resolved = false;
         d.votesFor = 0;
         d.votesAgainst = 0;
-        emit DisputeCreated(disputeCount, job, msg.sender);
+        d.reason = reason;
+        
+        emit DisputeCreated(disputeCount, job, msg.sender, reason);
         return disputeCount++;
-    }
-
-    function postMessage(uint256 id, string calldata message) external {
-        Dispute storage d = disputes[id];
-        require(!d.resolved, "Closed");
-
-        address employer = IProofOfWorkJob(d.job).employer();
-        require(
-            msg.sender == employer || msg.sender == d.initiator || isJuror[msg.sender],
-            "Not allowed"
-        );
-
-        d.messages.push(message);
-        emit MessagePosted(id, msg.sender, message);
-    }
-
-    function getMessages(uint256 id) external view returns (string[] memory) {
-        return disputes[id].messages;
     }
 
     function vote(uint256 id, bool support) external {
@@ -98,14 +83,18 @@ contract DisputeDAO is Ownable, ReentrancyGuard {
         address initiator,
         bool resolved,
         uint256 votesFor,
-        uint256 votesAgainst
+        uint256 votesAgainst,
+        string memory reason
     ) {
         Dispute storage d = disputes[id];
-        return (d.job, d.initiator, d.resolved, d.votesFor, d.votesAgainst);
+        return (d.job, d.initiator, d.resolved, d.votesFor, d.votesAgainst, d.reason);
     }
 
     function getDisputeCount() external view returns (uint256) {
         return disputeCount;
     }
 
+    function getDisputeReason(uint256 id) external view returns (string memory) {
+        return disputes[id].reason;
+    }
 }
