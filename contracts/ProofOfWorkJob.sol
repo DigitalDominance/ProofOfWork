@@ -7,6 +7,7 @@ import "./DisputeDAO.sol";
 
 contract ProofOfWorkJob is ReentrancyGuard {
     enum PayType { WEEKLY, ONE_OFF }
+    enum ApplicationStatus { PENDING, REVIEWED, REJECTED, ACCEPTED }
 
     PayType public immutable payType;
     address public immutable employer;
@@ -26,12 +27,22 @@ contract ProofOfWorkJob is ReentrancyGuard {
     ReputationSystem public reputation;
     DisputeDAO public disputeDAO;
 
-    // Applicant structure
+    // Job completion tracking for ratings
+    mapping(address => bool) public hasCompletedJob;
+    mapping(address => bool) public hasRatedEmployer;
+    mapping(address => bool) public employerHasRatedWorker;
+    
+    bool public jobEnded = false;
+
+    // Enhanced Applicant structure
     struct Applicant {
         address applicantAddress;
         string application;
         uint256 appliedAt;
-        bool isActive; // To track if application is still valid
+        bool isActive;
+        ApplicationStatus status;
+        uint256 reviewedAt;
+        bool wasAccepted; // Track if application was accepted (for reviewed applications)
     }
 
     // Applicant mappings and arrays
@@ -49,11 +60,15 @@ contract ProofOfWorkJob is ReentrancyGuard {
     // Events
     event ApplicationSubmitted(address indexed applicant, string application);
     event ApplicationWithdrawn(address indexed applicant);
+    event ApplicationAccepted(address indexed applicant);
+    event ApplicationDeclined(address indexed applicant);
     event WorkerAssigned(address indexed worker);
     event PaymentReleased(address indexed worker, uint256 amount);
     event OneOffPayment(address indexed worker, uint256 amount);
     event JobCompleted(address indexed worker);
-    event DisputeOpened(address indexed by, uint256 disputeId);
+    event DisputeOpened(address indexed by, uint256 disputeId, string reason);
+    event RatingSubmitted(address indexed rater, address indexed ratee, uint8 score);
+    event JobEnded();
 
     modifier onlyEmployer() {
         require(msg.sender == employer, "Only employer");
@@ -98,24 +113,88 @@ contract ProofOfWorkJob is ReentrancyGuard {
         disputeDAO = DisputeDAO(_disputeDAO);
     }
 
-    // ==================== APPLICANT FUNCTIONS ====================
+    // ==================== RATING FUNCTIONS ====================
 
     /**
-     * @dev Submit an application for the job
-     * @param _application The application text from the applicant
+     * @dev Rate a worker (only employer can rate workers)
+     * @param worker The worker's address
+     * @param score Rating score (1-5)
      */
+    function rateWorker(
+        address worker,
+        uint8 score
+    ) external onlyEmployer {
+        require(isWorker[worker], "Not a worker");
+        require(hasCompletedJob[worker] || jobEnded, "Worker hasn't completed job");
+        require(!employerHasRatedWorker[worker], "Already rated this worker");
+        require(score >= 1 && score <= 5, "Score must be 1-5");
+
+        employerHasRatedWorker[worker] = true;
+        reputation.submitRating(worker, score);
+        
+        emit RatingSubmitted(msg.sender, worker, score);
+    }
+
+    /**
+     * @dev Rate the employer (only workers can rate employer)
+     * @param score Rating score (1-5)
+     */
+    function rateEmployer(
+        uint8 score
+    ) external {
+        require(isWorker[msg.sender], "Not a worker");
+        require(hasCompletedJob[msg.sender] || jobEnded, "Haven't completed job");
+        require(!hasRatedEmployer[msg.sender], "Already rated employer");
+        require(score >= 1 && score <= 5, "Score must be 1-5");
+
+        hasRatedEmployer[msg.sender] = true;
+        reputation.submitRating(employer, score);
+        
+        emit RatingSubmitted(msg.sender, employer, score);
+    }
+
+    /**
+     * @dev End the job (allows all parties to rate even if job not fully completed)
+     */
+    function endJob() external onlyEmployer {
+        jobEnded = true;
+        emit JobEnded();
+    }
+
+    /**
+     * @dev Check if employer can rate a worker
+     */
+    function canRateWorker(address worker) external view returns (bool) {
+        return isWorker[worker] && 
+               (hasCompletedJob[worker] || jobEnded) && 
+               !employerHasRatedWorker[worker];
+    }
+
+    /**
+     * @dev Check if worker can rate employer
+     */
+    function canRateEmployer(address worker) external view returns (bool) {
+        return isWorker[worker] && 
+               (hasCompletedJob[worker] || jobEnded) && 
+               !hasRatedEmployer[worker];
+    }
+
+    // ==================== APPLICANT FUNCTIONS ====================
+
     function submitApplication(string memory _application) external {
         require(bytes(_application).length > 0, "Application cannot be empty");
         require(!hasApplied[msg.sender], "Already applied");
         require(!isWorker[msg.sender], "Already assigned as worker");
         require(assignedWorkers.length < positions, "All positions filled");
 
-        // Create applicant struct
         applicants[msg.sender] = Applicant({
             applicantAddress: msg.sender,
             application: _application,
             appliedAt: block.timestamp,
-            isActive: true
+            isActive: true,
+            status: ApplicationStatus.PENDING,
+            reviewedAt: 0,
+            wasAccepted: false
         });
 
         hasApplied[msg.sender] = true;
@@ -124,9 +203,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit ApplicationSubmitted(msg.sender, _application);
     }
 
-    /**
-     * @dev Withdraw an application (only by the applicant)
-     */
     function withdrawApplication() external {
         require(hasApplied[msg.sender], "No application found");
         require(applicants[msg.sender].isActive, "Application already inactive");
@@ -137,27 +213,255 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit ApplicationWithdrawn(msg.sender);
     }
 
+    // ==================== APPLICATION REVIEW FUNCTIONS ====================
+
     /**
-     * @dev Get all applicant addresses
+     * @dev Accept an application (only employer)
+     * @param applicant The applicant's address
      */
+    function acceptApplication(address applicant) external onlyEmployer {
+        require(hasApplied[applicant], "No application found");
+        require(applicants[applicant].isActive, "Application not active");
+        require(!isWorker[applicant], "Already assigned as worker");
+        require(assignedWorkers.length < positions, "Max positions filled");
+
+        // Set status to REVIEWED and mark as accepted
+        applicants[applicant].status = ApplicationStatus.REVIEWED;
+        applicants[applicant].reviewedAt = block.timestamp;
+        applicants[applicant].isActive = false;
+        applicants[applicant].wasAccepted = true;
+
+        // Assign as worker
+        isWorker[applicant] = true;
+        activeWorker[applicant] = true;
+        assignedWorkers.push(applicant);
+
+        emit ApplicationAccepted(applicant);
+        emit WorkerAssigned(applicant);
+    }
+
+    /**
+     * @dev Decline/Reject an application (only employer)
+     * @param applicant The applicant's address
+     */
+    function declineApplication(address applicant) external onlyEmployer {
+        require(hasApplied[applicant], "No application found");
+        require(applicants[applicant].isActive, "Application not active");
+        require(!isWorker[applicant], "Already assigned as worker");
+
+        // Set status to REVIEWED and mark as not accepted
+        applicants[applicant].status = ApplicationStatus.REVIEWED;
+        applicants[applicant].reviewedAt = block.timestamp;
+        applicants[applicant].isActive = false;
+        applicants[applicant].wasAccepted = false;
+
+        emit ApplicationDeclined(applicant);
+    }
+
+    /**
+     * @dev Decline multiple applications at once (only employer)
+     * @param applicantList Array of applicant addresses to decline
+     */
+    function batchDeclineApplications(address[] memory applicantList) external onlyEmployer {
+        for (uint256 i = 0; i < applicantList.length; i++) {
+            address applicant = applicantList[i];
+            if (hasApplied[applicant] && applicants[applicant].isActive && !isWorker[applicant]) {
+                applicants[applicant].status = ApplicationStatus.REVIEWED;
+                applicants[applicant].reviewedAt = block.timestamp;
+                applicants[applicant].isActive = false;
+                applicants[applicant].wasAccepted = false;
+
+                emit ApplicationDeclined(applicant);
+            }
+        }
+    }
+
+    /**
+     * @dev Batch accept multiple applications
+     * @param applicantList Array of applicant addresses to accept
+     */
+    function batchAcceptApplications(address[] memory applicantList) external onlyEmployer {
+        for (uint256 i = 0; i < applicantList.length; i++) {
+            address applicant = applicantList[i];
+            if (hasApplied[applicant] && 
+                applicants[applicant].isActive && 
+                !isWorker[applicant] && 
+                assignedWorkers.length < positions) {
+                
+                // Set status to REVIEWED and mark as accepted
+                applicants[applicant].status = ApplicationStatus.REVIEWED;
+                applicants[applicant].reviewedAt = block.timestamp;
+                applicants[applicant].isActive = false;
+                applicants[applicant].wasAccepted = true;
+
+                // Assign as worker
+                isWorker[applicant] = true;
+                activeWorker[applicant] = true;
+                assignedWorkers.push(applicant);
+
+                emit ApplicationAccepted(applicant);
+                emit WorkerAssigned(applicant);
+            }
+        }
+    }
+
+    /**
+     * @dev Get applications by status
+     * @param status The status to filter by
+     */
+    function getApplicationsByStatus(ApplicationStatus status) external view returns (address[] memory) {
+        uint256 count = 0;
+        
+        // Count matching applications
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            if (applicants[applicantAddresses[i]].status == status) {
+                count++;
+            }
+        }
+
+        address[] memory result = new address[](count);
+        uint256 index = 0;
+        
+        // Fill result array
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            address applicantAddr = applicantAddresses[i];
+            if (applicants[applicantAddr].status == status) {
+                result[index] = applicantAddr;
+                index++;
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * @dev Get reviewed applications that were accepted
+     */
+    function getAcceptedApplications() external view returns (address[] memory) {
+        uint256 count = 0;
+        
+        // Count accepted applications
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            if (applicants[applicantAddresses[i]].status == ApplicationStatus.REVIEWED && 
+                applicants[applicantAddresses[i]].wasAccepted) {
+                count++;
+            }
+        }
+
+        address[] memory result = new address[](count);
+        uint256 index = 0;
+        
+        // Fill result array
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            address applicantAddr = applicantAddresses[i];
+            if (applicants[applicantAddr].status == ApplicationStatus.REVIEWED && 
+                applicants[applicantAddr].wasAccepted) {
+                result[index] = applicantAddr;
+                index++;
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * @dev Get reviewed applications that were declined
+     */
+    function getDeclinedApplications() external view returns (address[] memory) {
+        uint256 count = 0;
+        
+        // Count declined applications
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            if (applicants[applicantAddresses[i]].status == ApplicationStatus.REVIEWED && 
+                !applicants[applicantAddresses[i]].wasAccepted) {
+                count++;
+            }
+        }
+
+        address[] memory result = new address[](count);
+        uint256 index = 0;
+        
+        // Fill result array
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            address applicantAddr = applicantAddresses[i];
+            if (applicants[applicantAddr].status == ApplicationStatus.REVIEWED && 
+                !applicants[applicantAddr].wasAccepted) {
+                result[index] = applicantAddr;
+                index++;
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * @dev Get pending applications count
+     */
+    function getPendingApplicationsCount() external view returns (uint256) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            if (applicants[applicantAddresses[i]].status == ApplicationStatus.PENDING && 
+                applicants[applicantAddresses[i]].isActive) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * @dev Get reviewed applications count
+     */
+    function getReviewedApplicationsCount() external view returns (uint256) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            if (applicants[applicantAddresses[i]].status == ApplicationStatus.REVIEWED) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * @dev Get accepted applications count
+     */
+    function getAcceptedApplicationsCount() external view returns (uint256) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            if (applicants[applicantAddresses[i]].status == ApplicationStatus.REVIEWED && 
+                applicants[applicantAddresses[i]].wasAccepted) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * @dev Get declined applications count
+     */
+    function getDeclinedApplicationsCount() external view returns (uint256) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < applicantAddresses.length; i++) {
+            if (applicants[applicantAddresses[i]].status == ApplicationStatus.REVIEWED && 
+                !applicants[applicantAddresses[i]].wasAccepted) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     function getAllApplicants() external view returns (address[] memory) {
         return applicantAddresses;
     }
 
-    /**
-     * @dev Get active applicants only
-     */
     function getActiveApplicants() external view returns (address[] memory) {
         uint256 activeCount = 0;
         
-        // First pass: count active applicants
         for (uint256 i = 0; i < applicantAddresses.length; i++) {
             if (applicants[applicantAddresses[i]].isActive && !isWorker[applicantAddresses[i]]) {
                 activeCount++;
             }
         }
 
-        // Second pass: populate array
         address[] memory activeApplicants = new address[](activeCount);
         uint256 index = 0;
         
@@ -172,14 +476,14 @@ contract ProofOfWorkJob is ReentrancyGuard {
         return activeApplicants;
     }
 
-    /**
-     * @dev Get applicant details by address
-     */
     function getApplicant(address _applicant) external view returns (
         address applicantAddress,
         string memory application,
         uint256 appliedAt,
-        bool isActive
+        bool isActive,
+        ApplicationStatus status,
+        uint256 reviewedAt,
+        bool wasAccepted
     ) {
         require(hasApplied[_applicant], "No application found");
         
@@ -188,20 +492,33 @@ contract ProofOfWorkJob is ReentrancyGuard {
             applicant.applicantAddress,
             applicant.application,
             applicant.appliedAt,
-            applicant.isActive
+            applicant.isActive,
+            applicant.status,
+            applicant.reviewedAt,
+            applicant.wasAccepted
         );
     }
 
     /**
-     * @dev Get total number of applications (including inactive)
+     * @dev Get application status as string for frontend display
      */
+    function getApplicationStatusString(address _applicant) external view returns (string memory) {
+        require(hasApplied[_applicant], "No application found");
+        
+        ApplicationStatus status = applicants[_applicant].status;
+        
+        if (status == ApplicationStatus.PENDING) return "Pending";
+        if (status == ApplicationStatus.REVIEWED) {
+            return applicants[_applicant].wasAccepted ? "Accepted" : "Declined";
+        }
+        
+        return "Unknown";
+    }
+
     function getTotalApplications() external view returns (uint256) {
         return applicantAddresses.length;
     }
 
-    /**
-     * @dev Get number of active applications
-     */
     function getActiveApplicationsCount() external view returns (uint256) {
         uint256 count = 0;
         for (uint256 i = 0; i < applicantAddresses.length; i++) {
@@ -215,31 +532,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
     // ==================== WORKER ASSIGNMENT FUNCTIONS ====================
 
     /**
-     * @dev Assign a worker from applicants (only employer)
-     * @param worker The address of the applicant to assign as worker
-     */
-    function assignWorker(address worker) external onlyEmployer {
-        require(worker != address(0), "Bad worker");
-        require(!isWorker[worker], "Already assigned");
-        require(assignedWorkers.length < positions, "Max positions filled");
-        
-        // Worker must have applied (optional check - you can remove if you want to assign anyone)
-        require(hasApplied[worker], "Must apply first");
-        require(applicants[worker].isActive, "Application not active");
-
-        isWorker[worker] = true;
-        activeWorker[worker] = true;
-        assignedWorkers.push(worker);
-
-        // Mark application as inactive since they're now assigned
-        applicants[worker].isActive = false;
-
-        emit WorkerAssigned(worker);
-    }
-
-    /**
-     * @dev Assign worker directly without requiring application (employer only)
-     * @param worker The address to assign as worker
+     * @dev Direct worker assignment without application (only employer)
+     * @param worker The worker's address to assign directly
      */
     function assignWorkerDirect(address worker) external onlyEmployer {
         require(worker != address(0), "Bad worker");
@@ -250,15 +544,21 @@ contract ProofOfWorkJob is ReentrancyGuard {
         activeWorker[worker] = true;
         assignedWorkers.push(worker);
 
-        // If they had applied, mark application as inactive
+        // If they had applied, mark as reviewed and accepted
         if (hasApplied[worker]) {
+            applicants[worker].status = ApplicationStatus.REVIEWED;
             applicants[worker].isActive = false;
+            applicants[worker].wasAccepted = true;
+            if (applicants[worker].reviewedAt == 0) {
+                applicants[worker].reviewedAt = block.timestamp;
+            }
+            emit ApplicationAccepted(worker);
         }
 
         emit WorkerAssigned(worker);
     }
 
-    // ==================== EXISTING FUNCTIONS ====================
+    // ==================== WORKER FUNCTIONS ====================
 
     function getAssignedWorkers() external view returns (address[] memory) {
         return assignedWorkers;
@@ -285,6 +585,12 @@ contract ProofOfWorkJob is ReentrancyGuard {
         require(s, "Pay failed");
 
         reputation.updateWorker(w, 1);
+        
+        // Mark as completed if this is the final payout
+        if (payoutsMade == durationWeeks) {
+            hasCompletedJob[w] = true;
+        }
+        
         emit PaymentReleased(w, amount);
     }
 
@@ -300,12 +606,14 @@ contract ProofOfWorkJob is ReentrancyGuard {
         require(s, "Pay failed");
 
         reputation.updateWorker(w, 1);
+        hasCompletedJob[w] = true;
+        
         emit OneOffPayment(w, amount);
         emit JobCompleted(w);
     }
 
-    function openDispute() external {
-        uint256 id = disputeDAO.createDispute(address(this));
-        emit DisputeOpened(msg.sender, id);
+    function openDispute(string calldata reason) external {
+        uint256 id = disputeDAO.createDispute(address(this), reason);
+        emit DisputeOpened(msg.sender, id, reason);
     }
 }
