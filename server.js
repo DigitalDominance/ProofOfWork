@@ -1,4 +1,3 @@
-// server.js
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -12,6 +11,12 @@ const rateLimit = require("express-rate-limit");
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
+
+// ─── Token Secrets & Expirations ───────────────────────────────────────────────
+const ACCESS_TOKEN_SECRET  = process.env.JWT_ACCESS_SECRET;
+const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET;
+const ACCESS_TOKEN_EXPIRY  = "15m";       // short-lived
+const REFRESH_TOKEN_EXPIRY = "7d";        // long-lived
 
 // ─── Basic Middlewares ─────────────────────────────────────────────────────────
 app.use(cors());
@@ -83,7 +88,7 @@ app.post("/api/auth/challenge", (req, res) => {
   res.json({ challenge });
 });
 
-// 2. Verify signature → issue JWT
+// 2. Verify signature → issue Access & Refresh Tokens
 app.post("/api/auth/verify", async (req, res) => {
   try {
     const { wallet, signature, displayName, role } = req.body;
@@ -98,9 +103,6 @@ app.post("/api/auth/verify", async (req, res) => {
     if (signer.toLowerCase() !== wallet.toLowerCase())
       throw new Error("Invalid signature");
 
-    // Issue JWT
-    const token = jwt.sign({ wallet }, process.env.JWT_SECRET, { expiresIn: "1h" });
-
     // Create user if new (require displayName & role)
     let user = await POWUser.findOne({ wallet });
     if (!user) {
@@ -109,24 +111,55 @@ app.post("/api/auth/verify", async (req, res) => {
       user = await POWUser.create({ wallet, displayName, role });
     }
 
-    res.json({ token });
+    // Issue tokens
+    const accessToken  = jwt.sign(
+      { wallet, role: user.role },
+      ACCESS_TOKEN_SECRET,
+      { expiresIn: ACCESS_TOKEN_EXPIRY }
+    );
+    const refreshToken = jwt.sign(
+      { wallet, role: user.role },
+      REFRESH_TOKEN_SECRET,
+      { expiresIn: REFRESH_TOKEN_EXPIRY }
+    );
+
+    res.json({ accessToken, refreshToken });
   } catch (e) {
     console.error("Auth error:", e);
     res.status(401).json({ error: "Auth failed", details: e.message });
   }
 });
 
-// 3. Middleware to verify JWT
+// 3. Refresh Access Token
+app.post("/api/auth/refresh", (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken)
+    return res.status(400).json({ error: "Refresh token required" });
+  try {
+    const payload = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
+    const newAccessToken = jwt.sign(
+      { wallet: payload.wallet, role: payload.role },
+      ACCESS_TOKEN_SECRET,
+      { expiresIn: ACCESS_TOKEN_EXPIRY }
+    );
+    res.json({ accessToken: newAccessToken });
+  } catch (e) {
+    console.error("Refresh error:", e);
+    res.status(401).json({ error: "Invalid or expired refresh token" });
+  }
+});
+
+// 4. Middleware to verify Access Token
 function requireAuth(req, res, next) {
   const auth = req.headers.authorization?.split(" ");
   if (auth?.[0] !== "Bearer" || !auth[1])
-    return res.status(401).json({ error: "Missing token" });
+    return res.status(401).json({ error: "Missing access token" });
   try {
-    const payload = jwt.verify(auth[1], process.env.JWT_SECRET);
-    req.user = payload; // { wallet }
+    const payload = jwt.verify(auth[1], ACCESS_TOKEN_SECRET);
+    req.user = payload; // { wallet, role }
     next();
   } catch {
-    res.status(401).json({ error: "Invalid token" });
+    res.status(401).json({ error: "Invalid or expired access token" });
   }
 }
 
@@ -146,8 +179,7 @@ app.head("/api/users/:wallet", async (req, res) => {
 // ─── Job Endpoints ─────────────────────────────────────────────────────────────
 // Create a new job (employers only)
 app.post("/api/jobs", requireAuth, async (req, res) => {
-  const user = await POWUser.findOne({ wallet: req.user.wallet });
-  if (!user || user.role !== "employer")
+  if (req.user.role !== "employer")
     return res.status(403).json({ error: "Only employers can create jobs" });
 
   const { paymentType, jobName, jobDescription, jobTags } = req.body;
@@ -158,8 +190,8 @@ app.post("/api/jobs", requireAuth, async (req, res) => {
     paymentType,
     jobName,
     jobDescription,
-    jobTags: jobTags||[],
-    employerAddress: user.wallet
+    jobTags: jobTags || [],
+    employerAddress: req.user.wallet
   });
 
   res.status(201).json(job);
@@ -167,22 +199,19 @@ app.post("/api/jobs", requireAuth, async (req, res) => {
 
 // Update a job: assign employee or finish
 app.put("/api/jobs/:jobId", requireAuth, async (req, res) => {
-  const user = await POWUser.findOne({ wallet: req.user.wallet });
-  if (!user) return res.status(403).json({ error: "Invalid user" });
-
   const job = await POWJob.findById(req.params.jobId);
   if (!job) return res.status(404).json({ error: "Job not found" });
 
   // Only employer can assign employee
   if (req.body.employeeAddress) {
-    if (user.role !== "employer" || job.employerAddress !== user.wallet)
+    if (req.user.role !== "employer" || job.employerAddress !== req.user.wallet)
       return res.status(403).json({ error: "Not authorized to assign" });
     job.employeeAddress = req.body.employeeAddress;
     job.status = "IN_PROGRESS";
   }
   // Only assigned employee can mark finished
   if (req.body.finish === true) {
-    if (user.role !== "worker" || job.employeeAddress !== user.wallet)
+    if (req.user.role !== "worker" || job.employeeAddress !== req.user.wallet)
       return res.status(403).json({ error: "Not authorized to finish" });
     job.status = "FINISHED";
   }
