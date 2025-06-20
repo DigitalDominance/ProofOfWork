@@ -17,11 +17,8 @@ const allowedOrigin = /^https:\/\/([a-zA-Z0-9-]+\.)?proofofworks\.com$/;
 
 app.use(cors({
   origin: (origin, callback) => {
-    // allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
-    if (allowedOrigin.test(origin)) {
-      return callback(null, true);
-    }
+    if (allowedOrigin.test(origin)) return callback(null, true);
     return callback(new Error("Not allowed by CORS"), false);
   },
   credentials: true,
@@ -39,7 +36,6 @@ const io = new Server(server, {
 // ─── BASIC MIDDLEWARES ─────────────────────────────────────────────────────────
 app.use(express.json());
 
-// Rate limiting per wallet (or IP)
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60_000,
   max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 60,
@@ -100,7 +96,7 @@ app.post("/api/auth/challenge", (req, res) => {
 app.post("/api/auth/verify", async (req, res) => {
   try {
     const { wallet, signature, displayName, role } = req.body;
-    if (!wallet || !signature) 
+    if (!wallet || !signature)
       return res.status(400).json({ error: "Missing wallet or signature" });
 
     const record = challenges.get(wallet.toLowerCase());
@@ -233,19 +229,24 @@ app.post("/api/messages", requireAuth, async (req, res) => {
   if (disputeId == null || !content)
     return res.status(400).json({ error: "Missing fields" });
 
-  const msg = await POWMessage.create({
-    disputeId,
-    sender: req.user.wallet,
-    content,
-  });
-  io.to(`dispute_${disputeId}`).emit("newMessage", msg);
-  res.json(msg);
+  try {
+    const msg = await POWMessage.create({
+      disputeId: Number(disputeId),
+      sender:    req.user.wallet,
+      content,
+    });
+    io.to(`dispute_${disputeId}`).emit("newMessage", msg);
+    res.json(msg);
+  } catch (e) {
+    console.error("Message creation error:", e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get("/api/messages/:disputeId", requireAuth, async (req, res) => {
-  const page = parseInt(req.query.page, 10) || 1;
+  const page  = parseInt(req.query.page, 10)  || 1;
   const limit = parseInt(req.query.limit, 10) || 50;
-  const msgs = await POWMessage.find({ disputeId: req.params.disputeId })
+  const msgs  = await POWMessage.find({ disputeId: req.params.disputeId })
     .sort({ createdAt: 1 })
     .skip((page - 1) * limit)
     .limit(limit);
@@ -255,9 +256,7 @@ app.get("/api/messages/:disputeId", requireAuth, async (req, res) => {
 // ─── SOCKET.IO ────────────────────────────────────────────────────────────────
 io.on("connection", (socket) => {
   console.log("WS connected:", socket.id);
-  socket.on("joinRoom", (disputeId) => {
-    socket.join(`dispute_${disputeId}`);
-  });
+  socket.on("joinRoom", (id) => socket.join(`dispute_${id}`));
   socket.on("sendMessage", (msg) => {
     if (msg.disputeId && msg.content && msg.sender) {
       io.to(`dispute_${msg.disputeId}`).emit("newMessage", msg);
