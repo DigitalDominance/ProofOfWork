@@ -12,22 +12,35 @@ const app = express();
 const server = http.createServer(app);
 
 // ─── CORS CONFIGURATION ────────────────────────────────────────────────────────
-// Allow only https://www.proofofworks.com and any subdomain, with credentials
-const allowedOrigin = /^https:\/\/([a-zA-Z0-9-]+\.)?proofofworks\.com$/;
+// Allow https://www.proofofworks.com (and its subdomains) plus localhost for dev
+const allowedOrigins = [
+  /^https:\/\/([a-zA-Z0-9-]+\.)?proofofworks\.com$/,
+  /^http:\/\/localhost(:\d+)?$/,
+];
 
 app.use(cors({
   origin: (origin, callback) => {
+    // allow requests with no origin (e.g. Postman, mobile)
     if (!origin) return callback(null, true);
-    if (allowedOrigin.test(origin)) return callback(null, true);
+    // check against our whitelist
+    if (allowedOrigins.some(rx => rx.test(origin))) {
+      return callback(null, true);
+    }
     return callback(new Error("Not allowed by CORS"), false);
   },
   credentials: true,
 }));
 
-// Also restrict Socket.IO to same origins
+// Socket.IO CORS
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigin,
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.some(rx => rx.test(origin))) {
+        return callback(null, true);
+      }
+      return callback(new Error("Not allowed by CORS"), false);
+    },
     methods: ["GET", "POST"],
     credentials: true
   }
