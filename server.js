@@ -94,7 +94,7 @@ const POWMessage = mongoose.model("POWMessage", messageSchema);
 
 // ─── CHAT MESSAGING ───────────────────────────────────────────────────────────
 const chatSchema = new mongoose.Schema({
-  participants: { type: [String], required: true, index: true },
+  participants: { type: [String], required: true, index: true }, // sorted pair of wallets
   sender:       { type: String, required: true },
   receiver:     { type: String, required: true },
   content:      { type: String, required: true },
@@ -310,27 +310,6 @@ app.get("/api/chat/messages/:peer", requireAuth, async (req, res) => {
     .limit(limit);
 
   res.json(msgs);
-});
-
-// ─── P2P INBOX ENDPOINT ────────────────────────────────────────────────────────
-app.get("/api/chat/conversations", requireAuth, async (req, res) => {
-  const user  = req.user.wallet;
-  const page  = parseInt(req.query.page, 10)  || 1;
-  const limit = parseInt(req.query.limit, 10) || 10;
-
-  try {
-    const msgs = await POWChatMessage.find({
-      $or: [{ sender: user }, { receiver: user }]
-    })
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit);
-
-    res.json(msgs);
-  } catch (e) {
-    console.error("Error fetching user conversations:", e);
-    res.status(500).json({ error: e.message });
-  }
 });
 
 // ─── SOCKET.IO ────────────────────────────────────────────────────────────────
