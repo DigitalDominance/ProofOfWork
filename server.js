@@ -20,9 +20,7 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    // allow requests with no origin (e.g. Postman, mobile)
     if (!origin) return callback(null, true);
-    // check against our whitelist
     if (allowedOrigins.some(rx => rx.test(origin))) {
       return callback(null, true);
     }
@@ -93,6 +91,16 @@ messageSchema.index(
   { expireAfterSeconds: 14 * 24 * 3600 }
 );
 const POWMessage = mongoose.model("POWMessage", messageSchema);
+
+// ─── CHAT MESSAGING ───────────────────────────────────────────────────────────
+const chatSchema = new mongoose.Schema({
+  participants: { type: [String], required: true, index: true }, // sorted pair of wallets
+  sender:       { type: String, required: true },
+  receiver:     { type: String, required: true },
+  content:      { type: String, required: true },
+  createdAt:    { type: Date, default: Date.now },
+});
+const POWChatMessage = mongoose.model("POWChatMessage", chatSchema);
 
 // ─── AUTH HELPERS ──────────────────────────────────────────────────────────────
 const challenges = new Map();
@@ -266,13 +274,76 @@ app.get("/api/messages/:disputeId", requireAuth, async (req, res) => {
   res.json(msgs);
 });
 
+// ─── CHAT MESSAGING ENDPOINTS ────────────────────────────────────────────────
+app.post("/api/chat/messages", requireAuth, async (req, res) => {
+  const { to, content } = req.body;
+  const from = req.user.wallet;
+  if (!to || !content) return res.status(400).json({ error: "Missing fields: to and content required" });
+
+  try {
+    const participants = [from, to].sort();
+    const chatMsg = await POWChatMessage.create({
+      participants,
+      sender:   from,
+      receiver: to,
+      content,
+    });
+    const room = `chat_${participants.join("_")}`;
+    io.to(room).emit("newChatMessage", chatMsg);
+    res.json(chatMsg);
+  } catch (e) {
+    console.error("Chat message creation error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/chat/messages/:peer", requireAuth, async (req, res) => {
+  const peer  = req.params.peer;
+  const user  = req.user.wallet;
+  const page  = parseInt(req.query.page, 10)  || 1;
+  const limit = parseInt(req.query.limit, 10) || 50;
+  const participants = [user, peer].sort();
+
+  const msgs = await POWChatMessage.find({ participants })
+    .sort({ createdAt: 1 })
+    .skip((page - 1) * limit)
+    .limit(limit);
+
+  res.json(msgs);
+});
+
 // ─── SOCKET.IO ────────────────────────────────────────────────────────────────
 io.on("connection", (socket) => {
   console.log("WS connected:", socket.id);
+
+  // dispute chat
   socket.on("joinRoom", (id) => socket.join(`dispute_${id}`));
   socket.on("sendMessage", (msg) => {
     if (msg.disputeId && msg.content && msg.sender) {
       io.to(`dispute_${msg.disputeId}`).emit("newMessage", msg);
+    }
+  });
+
+  // direct user chat
+  socket.on("joinChat", ({ me, peer }) => {
+    const participants = [me, peer].sort();
+    socket.join(`chat_${participants.join("_")}`);
+  });
+  socket.on("sendChatMessage", async (data) => {
+    const { sender, to, content } = data;
+    if (!sender || !to || !content) return;
+    const participants = [sender, to].sort();
+    try {
+      const chatMsg = await POWChatMessage.create({
+        participants,
+        sender,
+        receiver: to,
+        content,
+      });
+      const room = `chat_${participants.join("_")}`;
+      io.to(room).emit("newChatMessage", chatMsg);
+    } catch (e) {
+      console.error("Socket chat error:", e);
     }
   });
 });
@@ -282,4 +353,3 @@ app.get("/", (req, res) => res.send("🔥 ProofOfWork API is live!"));
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`🌐 Listening on port ${PORT}`));
-
