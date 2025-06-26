@@ -314,13 +314,19 @@ app.get("/api/chat/messages/:peer", requireAuth, async (req, res) => {
 
 // ─── P2P INBOX ENDPOINT ────────────────────────────────────────────────────────
 app.get("/api/chat/conversations", requireAuth, async (req, res) => {
-  const user  = req.user.wallet;
-  const page  = parseInt(req.query.page, 10)  || 1;
+  const user  = req.user.wallet;                   // e.g. "0xAbC123..."
+  const page  = parseInt(req.query.page,  10) || 1;
   const limit = parseInt(req.query.limit, 10) || 10;
+
+  // build a regex that matches the exact wallet, ignoring case
+  const userRegex = new RegExp(`^${user}$`, "i");
 
   try {
     const msgs = await POWChatMessage.find({
-      $or: [{ sender: user }, { receiver: user }]
+      $or: [
+        { sender:   userRegex },
+        { receiver: userRegex }
+      ]
     })
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
