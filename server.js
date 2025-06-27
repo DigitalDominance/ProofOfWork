@@ -80,6 +80,24 @@ const jobSchema = new mongoose.Schema({
 });
 const POWJob = mongoose.model("POWJob", jobSchema);
 
+const taskSchema = new mongoose.Schema({
+  taskName:        { type: String, required: true },
+  taskDescription: { type: String, required: true },
+  taskTags:        { type: [String], default: [] },
+  workerAddress:   { type: String, required: true },
+  status:          { type: String, enum: ["OPEN", "OFFERED", "CONVERTED"], default: "OPEN" },
+  createdAt:       { type: Date, default: Date.now },
+});
+const POWTask = mongoose.model("POWTask", taskSchema);
+
+const offerSchema = new mongoose.Schema({
+  task:             { type: mongoose.Schema.Types.ObjectId, ref: "POWTask", required: true },
+  employerAddress:  { type: String, required: true },
+  status:           { type: String, enum: ["PENDING", "DECLINED", "ACCEPTED"], default: "PENDING" },
+  createdAt:        { type: Date, default: Date.now },
+});
+const POWOffer = mongoose.model("POWOffer", offerSchema);
+
 const messageSchema = new mongoose.Schema({
   disputeId:  { type: Number, required: true, index: true },
   sender:     { type: String, required: true },
@@ -92,7 +110,6 @@ messageSchema.index(
 );
 const POWMessage = mongoose.model("POWMessage", messageSchema);
 
-// ─── CHAT MESSAGING ───────────────────────────────────────────────────────────
 const chatSchema = new mongoose.Schema({
   participants: { type: [String], required: true, index: true },
   sender:       { type: String, required: true },
@@ -243,6 +260,106 @@ app.get("/api/jobs/:jobId", async (req, res) => {
   if (!job) return res.status(404).json({ error: "Not found" });
   res.json(job);
 });
+app.delete("/api/jobs/:jobId", requireAuth, async (req, res) => {
+  const job = await POWJob.findById(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+  if (req.user.role !== "employer" || job.employerAddress !== req.user.wallet)
+    return res.status(403).json({ error: "Not authorized to delete" });
+  await job.deleteOne();
+  res.sendStatus(204);
+});
+
+// ─── TASK ENDPOINTS ────────────────────────────────────────────────────────────
+app.post("/api/tasks", requireAuth, async (req, res) => {
+  if (req.user.role !== "worker")
+    return res.status(403).json({ error: "Only workers can create tasks" });
+
+  // Limit to 3 concurrent tasks
+  const activeCount = await POWTask.countDocuments({
+    workerAddress: req.user.wallet,
+    status: { $in: ["OPEN", "OFFERED"] }
+  });
+  if (activeCount >= 3)
+    return res.status(400).json({ error: "Cannot have more than 3 active tasks" });
+
+  const { taskName, taskDescription, taskTags } = req.body;
+  if (!taskName || !taskDescription)
+    return res.status(400).json({ error: "Missing required fields" });
+
+  const task = await POWTask.create({
+    taskName,
+    taskDescription,
+    taskTags: taskTags || [],
+    workerAddress: req.user.wallet
+  });
+  res.status(201).json(task);
+});
+
+app.get("/api/tasks", async (req, res) => {
+  const tasks = await POWTask.find();
+  res.json(tasks);
+});
+app.get("/api/tasks/:taskId", async (req, res) => {
+  const task = await POWTask.findById(req.params.taskId);
+  if (!task) return res.status(404).json({ error: "Task not found" });
+  res.json(task);
+});
+app.delete("/api/tasks/:taskId", requireAuth, async (req, res) => {
+  const task = await POWTask.findById(req.params.taskId);
+  if (!task) return res.status(404).json({ error: "Task not found" });
+  if (req.user.role !== "worker" || task.workerAddress !== req.user.wallet)
+    return res.status(403).json({ error: "Not authorized to delete" });
+  await task.deleteOne();
+  res.sendStatus(204);
+});
+
+// ─── OFFER ENDPOINTS ──────────────────────────────────────────────────────────
+app.post("/api/tasks/:taskId/offers", requireAuth, async (req, res) => {
+  if (req.user.role !== "employer")
+    return res.status(403).json({ error: "Only employers can make offers" });
+
+  const task = await POWTask.findById(req.params.taskId);
+  if (!task) return res.status(404).json({ error: "Task not found" });
+  if (task.status !== "OPEN")
+    return res.status(400).json({ error: "Task is not open for offers" });
+
+  const offer = await POWOffer.create({
+    task: task._id,
+    employerAddress: req.user.wallet
+  });
+  task.status = "OFFERED";
+  await task.save();
+  res.status(201).json(offer);
+});
+
+app.post("/api/offers/:offerId/job", requireAuth, async (req, res) => {
+  const offer = await POWOffer.findById(req.params.offerId).populate("task");
+  if (!offer) return res.status(404).json({ error: "Offer not found" });
+  if (offer.employerAddress !== req.user.wallet)
+    return res.status(403).json({ error: "Not authorized to convert this offer" });
+  if (offer.status !== "PENDING")
+    return res.status(400).json({ error: "Offer cannot be converted" });
+
+  const { paymentType } = req.body;
+  if (!paymentType)
+    return res.status(400).json({ error: "paymentType required to create job" });
+
+  const job = await POWJob.create({
+    paymentType,
+    jobName: offer.task.taskName,
+    jobDescription: offer.task.taskDescription,
+    jobTags: offer.task.taskTags,
+    employerAddress: req.user.wallet
+  });
+
+  offer.status = "DECLINED";
+  await offer.save();
+
+  offer.task.status = "CONVERTED";
+  await offer.task.save();
+
+  res.status(201).json(job);
+});
 
 // ─── DISPUTE MESSAGING ────────────────────────────────────────────────────────
 app.post("/api/messages", requireAuth, async (req, res) => {
@@ -312,13 +429,11 @@ app.get("/api/chat/messages/:peer", requireAuth, async (req, res) => {
   res.json(msgs);
 });
 
-// ─── P2P INBOX ENDPOINT ────────────────────────────────────────────────────────
 app.get("/api/chat/conversations", requireAuth, async (req, res) => {
-  const user  = req.user.wallet;                   // e.g. "0xAbC123..."
+  const user  = req.user.wallet;
   const page  = parseInt(req.query.page,  10) || 1;
   const limit = parseInt(req.query.limit, 10) || 10;
 
-  // build a regex that matches the exact wallet, ignoring case
   const userRegex = new RegExp(`^${user}$`, "i");
 
   try {
@@ -343,7 +458,6 @@ app.get("/api/chat/conversations", requireAuth, async (req, res) => {
 io.on("connection", (socket) => {
   console.log("WS connected:", socket.id);
 
-  // dispute chat
   socket.on("joinRoom", (id) => socket.join(`dispute_${id}`));
   socket.on("sendMessage", (msg) => {
     if (msg.disputeId && msg.content && msg.sender) {
@@ -351,7 +465,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // direct user chat
   socket.on("joinChat", ({ me, peer }) => {
     const participants = [me, peer].sort();
     socket.join(`chat_${participants.join("_")}`);
