@@ -365,7 +365,6 @@ app.post("/api/offers/:offerId/job", requireAuth, async (req, res) => {
   res.status(201).json(job);
 });
 
-// **New**: Fetch offers by employer or by worker
 app.get("/api/offers", requireAuth, async (req, res) => {
   const { employerAddress, workerAddress } = req.query;
   if (!employerAddress && !workerAddress) {
