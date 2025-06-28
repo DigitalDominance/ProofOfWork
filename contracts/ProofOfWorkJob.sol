@@ -497,9 +497,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         return count;
     }
 
-    /**
-     * @dev Get declined applications count
-     */
+   
     function getDeclinedApplicationsCount() external view returns (uint256) {
         uint256 count = 0;
         for (uint256 i = 0; i < applicantAddresses.length; i++) {
@@ -561,9 +559,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         );
     }
 
-    /**
-     * @dev Get application status as string for frontend display
-     */
+    
     function getApplicationStatusString(address _applicant) external view returns (string memory) {
         require(hasApplied[_applicant], "No application found");
         
@@ -591,12 +587,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         return count;
     }
 
-    // ==================== WORKER ASSIGNMENT FUNCTIONS ====================
-
-    /**
-     * @dev Direct worker assignment without application (only employer)
-     * @param worker The worker's address to assign directly
-     */
+ 
     function assignWorkerDirect(address worker) external onlyEmployer jobNotCancelled {
         require(worker != address(0), "Bad worker");
         require(!isWorker[worker], "Already assigned");
@@ -620,12 +611,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit WorkerAssigned(worker);
     }
 
-    // ==================== PAYMENT REQUEST FUNCTIONS ====================
-
-    /**
-     * @dev Request weekly payment (called by worker)
-     * @param workDescription Description of work completed
-     */
+    
     function requestWeeklyPayment(string memory workDescription) external jobNotCancelled {
         require(payType == PayType.WEEKLY, "Not weekly job");
         require(isWorker[msg.sender], "Not assigned worker");
@@ -652,10 +638,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit PaymentRequested(msg.sender, weeklyPay, currentWeek, workDescription);
     }
 
-    /**
-     * @dev Request one-off payment (called by worker)
-     * @param workDescription Description of work completed
-     */
+
     function requestOneOffPayment(string memory workDescription) external jobNotCancelled {
         require(payType == PayType.ONE_OFF, "Not one-off job");
         require(isWorker[msg.sender], "Not assigned worker");
@@ -678,10 +661,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit PaymentRequested(msg.sender, totalPay, 0, workDescription);
     }
 
-    /**
-     * @dev Approve payment request (called by employer)
-     * @param worker The worker's address
-     */
+ 
     function approvePaymentRequest(address worker) external onlyEmployer nonReentrant jobNotCancelled {
         require(isWorker[worker], "Not assigned worker");
         require(currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING, "No pending request");
@@ -690,7 +670,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         request.status = PaymentRequestStatus.APPROVED;
         request.processedAt = block.timestamp;
 
-        // Process the payment
+
         uint256 amount = request.amount;
         
         if (payType == PayType.WEEKLY) {
@@ -702,7 +682,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
             lastPayoutAt = block.timestamp;
             payoutsMade++;
             
-            // Mark as completed if this is the final payout
+
             if (payoutsMade == durationWeeks) {
                 hasCompletedJob[worker] = true;
             }
@@ -712,14 +692,14 @@ contract ProofOfWorkJob is ReentrancyGuard {
             hasCompletedJob[worker] = true;
         }
 
-        // Transfer payment
+
         (bool success, ) = payable(worker).call{value: amount}("");
         require(success, "Payment transfer failed");
 
-        // Update reputation
+
         reputation.updateWorker(worker, 1);
 
-        // Add to history and clear current request
+
         paymentRequestHistory.push(request);
         delete currentPaymentRequest[worker];
 
@@ -732,11 +712,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         }
     }
 
-    /**
-     * @dev Reject payment request (called by employer)
-     * @param worker The worker's address
-     * @param reason Reason for rejection
-     */
+    
     function rejectPaymentRequest(address worker, string memory reason) external onlyEmployer jobNotCancelled {
         require(isWorker[worker], "Not assigned worker");
         require(currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING, "No pending request");
@@ -754,9 +730,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit PaymentRequestRejected(worker, reason);
     }
 
-    /**
-     * @dev Cancel payment request (called by worker)
-     */
+  
     function cancelPaymentRequest() external jobNotCancelled {
         require(isWorker[msg.sender], "Not assigned worker");
         require(currentPaymentRequest[msg.sender].status == PaymentRequestStatus.PENDING, "No pending request");
@@ -764,9 +738,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         delete currentPaymentRequest[msg.sender];
     }
 
-    /**
-     * @dev Get all pending payment requests (for employer dashboard)
-     */
+   
     function getPendingPaymentRequests() external view returns (address[] memory) {
         uint256 count = 0;
         
@@ -793,9 +765,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         return pendingWorkers;
     }
 
-    /**
-     * @dev Get payment request details
-     */
+   
     function getPaymentRequest(address worker) external view returns (
         address workerAddr,
         uint256 amount,
@@ -819,16 +789,11 @@ contract ProofOfWorkJob is ReentrancyGuard {
         );
     }
 
-    /**
-     * @dev Get payment request history count
-     */
+
     function getPaymentRequestHistoryCount() external view returns (uint256) {
         return paymentRequestHistory.length;
     }
 
-    /**
-     * @dev Get payment request from history
-     */
     function getPaymentRequestHistory(uint256 index) external view returns (
         address workerAddr,
         uint256 amount,
@@ -853,9 +818,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         );
     }
 
-    /**
-     * @dev Check if worker can request payment
-     */
     function canRequestPayment(address worker) external view returns (bool, string memory) {
         if (!isWorker[worker]) {
             return (false, "Not assigned worker");
@@ -889,7 +851,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         return (true, "Can request payment");
     }
 
-    // ==================== WORKER FUNCTIONS ====================
 
     function getAssignedWorkers() external view returns (address[] memory) {
         return assignedWorkers;
@@ -905,11 +866,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit DisputeOpened(msg.sender, id, reason);
     }
 
-    // ==================== VIEW FUNCTIONS ====================
 
-    /**
-     * @dev Get job summary information
-     */
     function getJobSummary() external view returns (
         address jobEmployer,
         PayType jobPayType,
@@ -936,9 +893,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         );
     }
 
-    /**
-     * @dev Get worker status for a specific address
-     */
+
     function getWorkerStatus(address worker) external view returns (
         bool isAssignedWorker,
         bool isActiveWorker,
@@ -957,9 +912,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         );
     }
 
-    /**
-     * @dev Get payment status for a worker
-     */
+
     function getPaymentStatus(address worker) external view returns (
         bool canRequest,
         uint256 nextWeekNumber,
@@ -985,23 +938,15 @@ contract ProofOfWorkJob is ReentrancyGuard {
         );
     }
 
-    /**
-     * @dev Get contract balance
-     */
+  
     function getContractBalance() external view returns (uint256) {
         return address(this).balance;
     }
 
-    /**
-     * @dev Get tags array
-     */
     function getTags() external view returns (string[] memory) {
         return tags;
     }
 
-    /**
-     * @dev Get remaining payment amount
-     */
     function getRemainingPayment() external view returns (uint256) {
         if (payType == PayType.WEEKLY) {
             uint256 remainingWeeks = durationWeeks - payoutsMade;
@@ -1017,12 +962,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         }
     }
 
-    // ==================== EMERGENCY FUNCTIONS ====================
-
-    /**
-     * @dev Emergency function to withdraw funds (only admin)
-     * Should only be used in extreme circumstances
-     */
+ 
     function emergencyWithdraw() external onlyAdmin nonReentrant {
         uint256 balance = address(this).balance;
         require(balance > 0, "No funds to withdraw");
@@ -1031,11 +971,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         require(success, "Emergency withdrawal failed");
     }
 
-    // ==================== RECEIVE FUNCTION ====================
 
-    /**
-     * @dev Allow contract to receive ETH
-     */
     receive() external payable {
         // Contract can receive additional funding
     }
