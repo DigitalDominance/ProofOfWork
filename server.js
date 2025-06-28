@@ -365,13 +365,14 @@ app.post("/api/offers/:offerId/job", requireAuth, async (req, res) => {
   res.status(201).json(job);
 });
 
+// ─── FETCH OFFERS ─────────────────────────────────────────────────────────────
 app.get("/api/offers", requireAuth, async (req, res) => {
   const { employerAddress, workerAddress } = req.query;
   if (!employerAddress && !workerAddress) {
     return res.status(400).json({ error: "Provide employerAddress or workerAddress" });
   }
 
-  const filter: any = {};
+  const filter = {};
   if (employerAddress) filter.employerAddress = employerAddress;
   if (workerAddress)   filter.workerAddress   = workerAddress;
 
@@ -386,6 +387,7 @@ app.get("/api/offers", requireAuth, async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
 
 // ─── DISPUTE MESSAGING ────────────────────────────────────────────────────────
 app.post("/api/messages", requireAuth, async (req, res) => {
