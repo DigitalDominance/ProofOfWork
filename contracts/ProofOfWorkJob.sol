@@ -900,22 +900,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         activeWorker[msg.sender] = active;
     }
 
-    /**
-     * @dev Legacy function - now redirects to request payment
-     * @deprecated Use requestWeeklyPayment instead
-     */
-    function releaseWeekly() external view {
-        revert("Use requestWeeklyPayment instead");
-    }
-
-    /**
-     * @dev Legacy function - now redirects to request payment
-     * @deprecated Use requestOneOffPayment instead
-     */
-    function releaseOneOff() external view {
-        revert("Use requestOneOffPayment instead");
-    }
-
     function openDispute(string calldata reason) external jobNotCancelled {
         uint256 id = disputeDAO.createDispute(address(this), reason);
         emit DisputeOpened(msg.sender, id, reason);
