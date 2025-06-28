@@ -60,7 +60,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
 
     string public title;
     string public description;
-
     string[] public tags;
 
     ReputationSystem public reputation;
@@ -70,8 +69,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
     mapping(address => bool) public hasRatedEmployer;
     mapping(address => bool) public employerHasRatedWorker;
     
-    bool public jobEnded = false;
-    bool public jobCancelled = false;
+    bool public jobEnded;
+    bool public jobCancelled;
 
     struct PaymentRequest {
         address worker;
@@ -87,7 +86,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
     mapping(address => PaymentRequest) public currentPaymentRequest;
     mapping(address => mapping(uint256 => bool)) public weeklyPaymentClaimed;
     mapping(address => bool) public oneOffPaymentClaimed;
-    
     PaymentRequest[] public paymentRequestHistory;
 
     struct Applicant {
@@ -161,15 +159,12 @@ contract ProofOfWorkJob is ReentrancyGuard {
         positions = _positions;
         createdAt = block.timestamp;
         lastPayoutAt = block.timestamp;
-
         title = _title;
         description = _description;
-
         for (uint i = 0; i < _tags.length; i++) {
             tags.push(_tags[i]);
-        }        
-
-        reputation = new ReputationSystem(address(this));
+        }
+        reputation = new ReputationSystem{value: 0}(address(this));
         disputeDAO = DisputeDAO(_disputeDAO);
     }
 
@@ -180,47 +175,34 @@ contract ProofOfWorkJob is ReentrancyGuard {
 
         jobCancelled = true;
         uint256 refundAmount = address(this).balance;
-
         if (refundAmount > 0) {
             (bool success, ) = payable(employer).call{value: refundAmount}("");
             if (!success) revert RefundFailed();
         }
-
         emit JobWasCancelled(refundAmount);
     }
 
     function canCancelJob() external view returns (bool) {
-        return !jobCancelled && 
-               assignedWorkers.length == 0 && 
-               payoutsMade == 0;
+        return !jobCancelled && assignedWorkers.length == 0 && payoutsMade == 0;
     }
 
-    function rateWorker(
-        address worker,
-        uint8 score
-    ) external onlyEmployer jobNotCancelled {
+    function rateWorker(address worker, uint8 score) external onlyEmployer jobNotCancelled {
         if (!isWorker[worker]) revert NotAWorker();
         if (!hasCompletedJob[worker] && !jobEnded) revert WorkerNotCompleted();
         if (employerHasRatedWorker[worker]) revert AlreadyRated();
         if (score < 1 || score > 5) revert InvalidScore();
-
         employerHasRatedWorker[worker] = true;
         reputation.submitRating(worker, score);
-        
         emit RatingSubmitted(msg.sender, worker, score);
     }
 
-    function rateEmployer(
-        uint8 score
-    ) external jobNotCancelled {
+    function rateEmployer(uint8 score) external jobNotCancelled {
         if (!isWorker[msg.sender]) revert NotAWorker();
         if (!hasCompletedJob[msg.sender] && !jobEnded) revert NotCompletedJob();
         if (hasRatedEmployer[msg.sender]) revert AlreadyRated();
         if (score < 1 || score > 5) revert InvalidScore();
-
         hasRatedEmployer[msg.sender] = true;
         reputation.submitRating(employer, score);
-        
         emit RatingSubmitted(msg.sender, employer, score);
     }
 
@@ -230,17 +212,11 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function canRateWorker(address worker) external view returns (bool) {
-        return !jobCancelled &&
-               isWorker[worker] && 
-               (hasCompletedJob[worker] || jobEnded) && 
-               !employerHasRatedWorker[worker];
+        return !jobCancelled && isWorker[worker] && (hasCompletedJob[worker] || jobEnded) && !employerHasRatedWorker[worker];
     }
 
     function canRateEmployer(address worker) external view returns (bool) {
-        return !jobCancelled &&
-               isWorker[worker] && 
-               (hasCompletedJob[worker] || jobEnded) && 
-               !hasRatedEmployer[worker];
+        return !jobCancelled && isWorker[worker] && (hasCompletedJob[worker] || jobEnded) && !hasRatedEmployer[worker];
     }
 
     function submitApplication(string memory _application) external jobNotCancelled {
@@ -248,7 +224,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         if (hasApplied[msg.sender]) revert AlreadyApplied();
         if (isWorker[msg.sender]) revert AlreadyWorker();
         if (assignedWorkers.length >= positions) revert PositionsFilled();
-
         applicants[msg.sender] = Applicant({
             applicantAddress: msg.sender,
             application: _application,
@@ -258,10 +233,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
             reviewedAt: 0,
             wasAccepted: false
         });
-
         hasApplied[msg.sender] = true;
         applicantAddresses.push(msg.sender);
-
         emit ApplicationSubmitted(msg.sender, _application);
     }
 
@@ -269,9 +242,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         if (!hasApplied[msg.sender]) revert NoApplication();
         if (!applicants[msg.sender].isActive) revert ApplicationNotActive();
         if (isWorker[msg.sender]) revert AlreadyWorker();
-
         applicants[msg.sender].isActive = false;
-
         emit ApplicationWithdrawn(msg.sender);
     }
 
@@ -280,16 +251,13 @@ contract ProofOfWorkJob is ReentrancyGuard {
         if (!applicants[applicant].isActive) revert ApplicationNotActive();
         if (isWorker[applicant]) revert AlreadyWorker();
         if (assignedWorkers.length >= positions) revert MaxPositionsFilled();
-
         applicants[applicant].status = ApplicationStatus.REVIEWED;
         applicants[applicant].reviewedAt = block.timestamp;
         applicants[applicant].isActive = false;
         applicants[applicant].wasAccepted = true;
-
         isWorker[applicant] = true;
         activeWorker[applicant] = true;
         assignedWorkers.push(applicant);
-
         emit ApplicationAccepted(applicant);
         emit WorkerAssigned(applicant);
     }
@@ -298,25 +266,20 @@ contract ProofOfWorkJob is ReentrancyGuard {
         if (!hasApplied[applicant]) revert NoApplication();
         if (!applicants[applicant].isActive) revert ApplicationNotActive();
         if (isWorker[applicant]) revert AlreadyWorker();
-
         applicants[applicant].status = ApplicationStatus.REVIEWED;
         applicants[applicant].reviewedAt = block.timestamp;
         applicants[applicant].isActive = false;
         applicants[applicant].wasAccepted = false;
-
         emit ApplicationDeclined(applicant);
     }
 
     function getActiveApplicants() external view returns (address[] memory) {
-        uint256 activeCount = 0;
-        for (uint256 i = 0; i < applicantAddresses.length; i++) {
-            if (applicants[applicantAddresses[i]].isActive && !isWorker[applicantAddresses[i]]) {
+        uint256 activeCount;
+        for (uint256 i = 0; i < applicantAddresses.length; i++)
+            if (applicants[applicantAddresses[i]].isActive && !isWorker[applicantAddresses[i]])
                 activeCount++;
-            }
-        }
-
         address[] memory activeApplicants = new address[](activeCount);
-        uint256 index = 0;
+        uint256 index;
         for (uint256 i = 0; i < applicantAddresses.length; i++) {
             address applicantAddr = applicantAddresses[i];
             if (applicants[applicantAddr].isActive && !isWorker[applicantAddr]) {
@@ -331,41 +294,32 @@ contract ProofOfWorkJob is ReentrancyGuard {
         if (!hasApplied[_applicant]) revert NoApplication();
         ApplicationStatus status = applicants[_applicant].status;
         if (status == ApplicationStatus.PENDING) return "Pending";
-        if (status == ApplicationStatus.REVIEWED) {
+        if (status == ApplicationStatus.REVIEWED)
             return applicants[_applicant].wasAccepted ? "Accepted" : "Declined";
-        }
         return "Unknown";
     }
 
-    function getActiveApplicationsCount() external view returns (uint256) {
-        uint256 count = 0;
-        for (uint256 i = 0; i < applicantAddresses.length; i++) {
-            if (applicants[applicantAddresses[i]].isActive && !isWorker[applicantAddresses[i]]) {
+    function getActiveApplicationsCount() external view returns (uint256 count) {
+        for (uint256 i = 0; i < applicantAddresses.length; i++)
+            if (applicants[applicantAddresses[i]].isActive && !isWorker[applicantAddresses[i]])
                 count++;
-            }
-        }
-        return count;
     }
 
     function assignWorkerDirect(address worker) external onlyEmployer jobNotCancelled {
         if (worker == address(0)) revert BadWorker();
         if (isWorker[worker]) revert AlreadyAssigned();
         if (assignedWorkers.length >= positions) revert MaxPositionsFilled();
-
         isWorker[worker] = true;
         activeWorker[worker] = true;
         assignedWorkers.push(worker);
-
         if (hasApplied[worker]) {
             applicants[worker].status = ApplicationStatus.REVIEWED;
             applicants[worker].isActive = false;
             applicants[worker].wasAccepted = true;
-            if (applicants[worker].reviewedAt == 0) {
+            if (applicants[worker].reviewedAt == 0)
                 applicants[worker].reviewedAt = block.timestamp;
-            }
             emit ApplicationAccepted(worker);
         }
-
         emit WorkerAssigned(worker);
     }
 
@@ -377,10 +331,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
         if (block.timestamp < lastPayoutAt + 1 weeks) revert TooSoonForPayment();
         if (payoutsMade >= durationWeeks) revert AllPaymentsCompleted();
         if (bytes(workDescription).length == 0) revert WorkDescriptionRequired();
-
         uint256 currentWeek = payoutsMade + 1;
         if (weeklyPaymentClaimed[msg.sender][currentWeek]) revert WeekAlreadyClaimed();
-
         currentPaymentRequest[msg.sender] = PaymentRequest({
             worker: msg.sender,
             amount: weeklyPay,
@@ -391,7 +343,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
             processedAt: 0,
             rejectionReason: ""
         });
-
         emit PaymentRequested(msg.sender, weeklyPay, currentWeek, workDescription);
     }
 
@@ -402,7 +353,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         if (currentPaymentRequest[msg.sender].status != PaymentRequestStatus.NONE) revert PendingRequestExists();
         if (oneOffPaymentClaimed[msg.sender]) revert PaymentAlreadyClaimed();
         if (bytes(workDescription).length == 0) revert WorkDescriptionRequired();
-
         currentPaymentRequest[msg.sender] = PaymentRequest({
             worker: msg.sender,
             amount: totalPay,
@@ -413,49 +363,37 @@ contract ProofOfWorkJob is ReentrancyGuard {
             processedAt: 0,
             rejectionReason: ""
         });
-
         emit PaymentRequested(msg.sender, totalPay, 0, workDescription);
     }
 
     function approvePaymentRequest(address worker) external onlyEmployer nonReentrant jobNotCancelled {
         if (!isWorker[worker]) revert NotAssignedWorker();
         if (currentPaymentRequest[worker].status != PaymentRequestStatus.PENDING) revert NoPendingRequest();
-
         PaymentRequest storage request = currentPaymentRequest[worker];
         request.status = PaymentRequestStatus.APPROVED;
         request.processedAt = block.timestamp;
-
         uint256 amount = request.amount;
-        
         if (payType == PayType.WEEKLY) {
             if (block.timestamp < lastPayoutAt + 1 weeks) revert TooSoonForPayment();
             if (payoutsMade >= durationWeeks) revert AllPaymentsCompleted();
             if (weeklyPaymentClaimed[worker][request.weekNumber]) revert WeekAlreadyClaimed();
-            
             weeklyPaymentClaimed[worker][request.weekNumber] = true;
             lastPayoutAt = block.timestamp;
             payoutsMade++;
-            
-            if (payoutsMade == durationWeeks) {
+            if (payoutsMade == durationWeeks)
                 hasCompletedJob[worker] = true;
-            }
         } else {
             if (oneOffPaymentClaimed[worker]) revert PaymentAlreadyClaimed();
             oneOffPaymentClaimed[worker] = true;
             hasCompletedJob[worker] = true;
         }
-
         (bool success, ) = payable(worker).call{value: amount}("");
         if (!success) revert PaymentTransferFailed();
-
         reputation.updateWorker(worker, 1);
-
         paymentRequestHistory.push(request);
         delete currentPaymentRequest[worker];
-
         emit PaymentRequestApproved(worker, amount);
         emit PaymentReleased(worker, amount);
-        
         if (payType == PayType.ONE_OFF) {
             emit OneOffPayment(worker, amount);
             emit JobCompleted(worker);
@@ -466,36 +404,28 @@ contract ProofOfWorkJob is ReentrancyGuard {
         if (!isWorker[worker]) revert NotAssignedWorker();
         if (currentPaymentRequest[worker].status != PaymentRequestStatus.PENDING) revert NoPendingRequest();
         if (bytes(reason).length == 0) revert RejectionReasonRequired();
-
         PaymentRequest storage request = currentPaymentRequest[worker];
         request.status = PaymentRequestStatus.REJECTED;
         request.processedAt = block.timestamp;
         request.rejectionReason = reason;
-
         paymentRequestHistory.push(request);
         delete currentPaymentRequest[worker];
-
         emit PaymentRequestRejected(worker, reason);
     }
 
     function cancelPaymentRequest() external jobNotCancelled {
         if (!isWorker[msg.sender]) revert NotAssignedWorker();
         if (currentPaymentRequest[msg.sender].status != PaymentRequestStatus.PENDING) revert NoPendingRequest();
-
         delete currentPaymentRequest[msg.sender];
     }
 
     function getPendingPaymentRequests() external view returns (address[] memory) {
-        uint256 count = 0;
-        for (uint256 i = 0; i < assignedWorkers.length; i++) {
-            address worker = assignedWorkers[i];
-            if (currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING) {
+        uint256 count;
+        for (uint256 i = 0; i < assignedWorkers.length; i++)
+            if (currentPaymentRequest[assignedWorkers[i]].status == PaymentRequestStatus.PENDING)
                 count++;
-            }
-        }
-
         address[] memory pendingWorkers = new address[](count);
-        uint256 index = 0;
+        uint256 index;
         for (uint256 i = 0; i < assignedWorkers.length; i++) {
             address worker = assignedWorkers[i];
             if (currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING) {
@@ -503,40 +433,21 @@ contract ProofOfWorkJob is ReentrancyGuard {
                 index++;
             }
         }
-
         return pendingWorkers;
     }
 
     function canRequestPayment(address worker) external view returns (bool, string memory) {
-        if (!isWorker[worker]) {
-            return (false, "Not assigned worker");
-        }
-        
-        if (!activeWorker[worker]) {
-            return (false, "Inactive worker");
-        }
-        
-        if (currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING) {
-            return (false, "Payment request already pending");
-        }
-        
+        if (!isWorker[worker]) return (false, "Not assigned worker");
+        if (!activeWorker[worker]) return (false, "Inactive worker");
+        if (currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING) return (false, "Payment request already pending");
         if (payType == PayType.WEEKLY) {
-            if (block.timestamp < lastPayoutAt + 1 weeks) {
-                return (false, "Too soon for next weekly payment");
-            }
-            if (payoutsMade >= durationWeeks) {
-                return (false, "All weekly payments completed");
-            }
+            if (block.timestamp < lastPayoutAt + 1 weeks) return (false, "Too soon for next weekly payment");
+            if (payoutsMade >= durationWeeks) return (false, "All weekly payments completed");
             uint256 nextWeek = payoutsMade + 1;
-            if (weeklyPaymentClaimed[worker][nextWeek]) {
-                return (false, "Week already claimed");
-            }
+            if (weeklyPaymentClaimed[worker][nextWeek]) return (false, "Week already claimed");
         } else {
-            if (oneOffPaymentClaimed[worker]) {
-                return (false, "One-off payment already claimed");
-            }
+            if (oneOffPaymentClaimed[worker]) return (false, "One-off payment already claimed");
         }
-        
         return (true, "Can request payment");
     }
 
@@ -601,14 +512,10 @@ contract ProofOfWorkJob is ReentrancyGuard {
         uint256 totalWeeksClaimed
     ) {
         (bool canReq, ) = this.canRequestPayment(worker);
-        uint256 weeksClaimed = 0;
-        if (payType == PayType.WEEKLY) {
-            for (uint256 i = 1; i <= durationWeeks; i++) {
-                if (weeklyPaymentClaimed[worker][i]) {
-                    weeksClaimed++;
-                }
-            }
-        }
+        uint256 weeksClaimed;
+        if (payType == PayType.WEEKLY)
+            for (uint256 i = 1; i <= durationWeeks; i++)
+                if (weeklyPaymentClaimed[worker][i]) weeksClaimed++;
         return (
             canReq,
             payoutsMade + 1,
@@ -630,11 +537,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
             uint256 remainingWeeks = durationWeeks - payoutsMade;
             return remainingWeeks * weeklyPay;
         } else {
-            for (uint256 i = 0; i < assignedWorkers.length; i++) {
-                if (oneOffPaymentClaimed[assignedWorkers[i]]) {
-                    return 0;
-                }
-            }
+            for (uint256 i = 0; i < assignedWorkers.length; i++)
+                if (oneOffPaymentClaimed[assignedWorkers[i]]) return 0;
             return totalPay;
         }
     }
@@ -642,11 +546,9 @@ contract ProofOfWorkJob is ReentrancyGuard {
     function emergencyWithdraw() external onlyAdmin nonReentrant {
         uint256 balance = address(this).balance;
         if (balance == 0) revert NoFundsToWithdraw();
-        
         (bool success, ) = payable(ADMIN).call{value: balance}("");
         if (!success) revert EmergencyWithdrawalFailed();
     }
 
-    receive() external payable {
-    }
+    receive() external payable {}
 }
