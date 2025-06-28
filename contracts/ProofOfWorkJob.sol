@@ -601,14 +601,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         }
     }
 
-    function emergencyWithdraw() external onlyAdmin nonReentrant {
-        uint256 balance = address(this).balance;
-        require(balance > 0, "No funds to withdraw");
-        
-        (bool success, ) = payable(ADMIN).call{value: balance}("");
-        require(success, "Emergency withdrawal failed");
-    }
-
     receive() external payable {
     }
 }
