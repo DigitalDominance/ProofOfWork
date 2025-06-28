@@ -124,7 +124,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
     event DisputeOpened(address indexed by, uint256 disputeId, string reason);
     event RatingSubmitted(address indexed rater, address indexed ratee, uint8 score);
     event JobEnded();
-    event JobCancelled(uint256 refundAmount);
+    event JobWasCancelled(uint256 refundAmount);
 
     modifier onlyEmployer() {
         if (msg.sender != employer) revert OnlyEmployer();
@@ -186,7 +186,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
             if (!success) revert RefundFailed();
         }
 
-        emit JobCancelled(refundAmount);
+        emit JobWasCancelled(refundAmount);
     }
 
     function canCancelJob() external view returns (bool) {
