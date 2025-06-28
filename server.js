@@ -93,8 +93,11 @@ const POWTask = mongoose.model("POWTask", taskSchema);
 const offerSchema = new mongoose.Schema({
   task:             { type: mongoose.Schema.Types.ObjectId, ref: "POWTask", required: true },
   employerAddress:  { type: String, required: true },
-  workerAddress:    { type: String, required: true },           // ← new
-  status:           { type: String, enum: ["PENDING","DECLINED","ACCEPTED"], default: "PENDING" },
+  workerAddress:    { type: String, required: true }, // Add this field
+  status:           { type: String, enum: ["PENDING", "DECLINED", "ACCEPTED"], default: "PENDING" },
+  kasAmount:        { type: String }, // Add these fields for offer details
+  paymentType:      { type: String, enum: ["weekly", "oneoff"] },
+  duration:         { type: String },
   createdAt:        { type: Date, default: Date.now },
 });
 const POWOffer = mongoose.model("POWOffer", offerSchema);
@@ -388,6 +391,98 @@ app.get("/api/offers", requireAuth, async (req, res) => {
   }
 });
 
+// Accept an offer (worker accepts employer's offer)
+app.post("/api/offers/:offerId/accept", requireAuth, async (req, res) => {
+  try {
+    const offer = await POWOffer.findById(req.params.offerId).populate("task");
+    
+    if (!offer) return res.status(404).json({ error: "Offer not found" });
+    
+    if (offer.workerAddress !== req.user.wallet)
+      return res.status(403).json({ error: "Not authorized to accept this offer" });
+    
+    if (offer.status !== "PENDING")
+      return res.status(400).json({ error: "Offer cannot be accepted" });
+
+    // Create job listing
+    const job = await POWJob.create({
+      paymentType: offer.paymentType?.toUpperCase() || "WEEKLY",
+      jobName: offer.task.taskName,
+      jobDescription: offer.task.taskDescription,
+      jobTags: offer.task.taskTags,
+      employerAddress: offer.employerAddress,
+      employeeAddress: req.user.wallet, // Assign worker immediately
+      status: "IN_PROGRESS"
+    });
+
+    // Update offer status
+    offer.status = "ACCEPTED";
+    await offer.save();
+
+    // Update task status
+    offer.task.status = "CONVERTED";
+    await offer.task.save();
+
+    res.status(201).json({ job, message: "Offer accepted and job created" });
+  } catch (e) {
+    console.error("Accept offer error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Decline an offer (worker declines employer's offer)
+app.post("/api/offers/:offerId/decline", requireAuth, async (req, res) => {
+  try {
+    const offer = await POWOffer.findById(req.params.offerId).populate("task");
+    
+    if (!offer) return res.status(404).json({ error: "Offer not found" });
+    
+    if (offer.workerAddress !== req.user.wallet)
+      return res.status(403).json({ error: "Not authorized to decline this offer" });
+    
+    if (offer.status !== "PENDING")
+      return res.status(400).json({ error: "Offer cannot be declined" });
+
+    // Update offer status
+    offer.status = "DECLINED";
+    await offer.save();
+
+    // Reset task status to OPEN
+    offer.task.status = "OPEN";
+    await offer.task.save();
+
+    res.json({ message: "Offer declined" });
+  } catch (e) {
+    console.error("Decline offer error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Cancel/delete an offer (employer cancels their offer)
+app.delete("/api/offers/:offerId", requireAuth, async (req, res) => {
+  try {
+    const offer = await POWOffer.findById(req.params.offerId).populate("task");
+    
+    if (!offer) return res.status(404).json({ error: "Offer not found" });
+    
+    if (offer.employerAddress !== req.user.wallet)
+      return res.status(403).json({ error: "Not authorized to cancel this offer" });
+
+    // Reset task status to OPEN if it was OFFERED
+    if (offer.task.status === "OFFERED") {
+      offer.task.status = "OPEN";
+      await offer.task.save();
+    }
+
+    // Delete the offer
+    await offer.deleteOne();
+
+    res.json({ message: "Offer cancelled successfully" });
+  } catch (e) {
+    console.error("Cancel offer error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ─── DISPUTE MESSAGING ────────────────────────────────────────────────────────
 app.post("/api/messages", requireAuth, async (req, res) => {
