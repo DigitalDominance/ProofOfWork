@@ -509,35 +509,35 @@ contract ProofOfWorkJob is ReentrancyGuard {
 
     function canRequestPayment(address worker) external view returns (bool, string memory) {
         if (!isWorker[worker]) {
-            return (false, "Not assigned worker");
+            return (false);
         }
         
         if (!activeWorker[worker]) {
-            return (false, "Inactive worker");
+            return (false);
         }
         
         if (currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING) {
-            return (false, "Payment request already pending");
+            return (false);
         }
         
         if (payType == PayType.WEEKLY) {
             if (block.timestamp < lastPayoutAt + 1 weeks) {
-                return (false, "Too soon for next weekly payment");
+                return (false);
             }
             if (payoutsMade >= durationWeeks) {
-                return (false, "All weekly payments completed");
+                return (false);
             }
             uint256 nextWeek = payoutsMade + 1;
             if (weeklyPaymentClaimed[worker][nextWeek]) {
-                return (false, "Week already claimed");
+                return (false);
             }
         } else {
             if (oneOffPaymentClaimed[worker]) {
-                return (false, "One-off payment already claimed");
+                return (false);
             }
         }
         
-        return (true, "Can request payment");
+        return (true);
     }
 
     function setActive(bool active) external jobNotCancelled {
