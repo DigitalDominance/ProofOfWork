@@ -87,6 +87,7 @@ const taskSchema = new mongoose.Schema({
   workerAddress:   { type: String, required: true },
   kasAmount:       { type: String }, // Add this field
   paymentType:     { type: String, enum: ["oneoff"], default: "oneoff" }, // Add this
+  duration:        { type: String }, // Add this (for future use)
   status:          { type: String, enum: ["OPEN", "OFFERED", "CONVERTED"], default: "OPEN" },
   createdAt:       { type: Date, default: Date.now },
 });
@@ -280,15 +281,16 @@ app.post("/api/tasks", requireAuth, async (req, res) => {
   if (req.user.role !== "worker")
     return res.status(403).json({ error: "Only workers can create tasks" });
 
-  // Limit to 3 concurrent tasks
   const activeCount = await POWTask.countDocuments({
     workerAddress: req.user.wallet,
     status: { $in: ["OPEN", "OFFERED"] }
   });
+
   if (activeCount >= 3)
     return res.status(400).json({ error: "Cannot have more than 3 active tasks" });
 
-  const { taskName, taskDescription, taskTags } = req.body;
+  const { taskName, taskDescription, taskTags, kasAmount, paymentType, duration } = req.body; // Added missing fields
+
   if (!taskName || !taskDescription)
     return res.status(400).json({ error: "Missing required fields" });
 
@@ -296,8 +298,12 @@ app.post("/api/tasks", requireAuth, async (req, res) => {
     taskName,
     taskDescription,
     taskTags: taskTags || [],
+    kasAmount, // Add this
+    paymentType, // Add this  
+    duration, // Add this
     workerAddress: req.user.wallet
   });
+
   res.status(201).json(task);
 });
 
