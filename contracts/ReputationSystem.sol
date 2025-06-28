@@ -11,20 +11,20 @@ contract ReputationSystem {
         bool exists;
     }
     
-    // User reputation data
+
     struct UserReputation {
         uint256 totalRatings;
         uint256 totalScore;
         uint256 jobsCompleted;
         mapping(address => Rating) ratingsReceived;
         mapping(address => Rating) ratingsGiven;
-        address[] ratingAddresses; // addresses that rated this user
+        address[] ratingAddresses; 
     }
     
-    // Mappings
+
     mapping(address => UserReputation) public userReputations;
     
-    // Events
+
     event RatingSubmitted(
         address indexed rater,
         address indexed ratee,
