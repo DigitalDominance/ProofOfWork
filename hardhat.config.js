@@ -32,7 +32,7 @@ module.exports = {
     settings: {
       optimizer: {
         enabled: true,
-        runs: 50
+        runs: 20
       }
     }
   },   // ← same as your old config
