@@ -409,10 +409,14 @@ app.post("/api/offers/:offerId/accept", requireAuth, async (req, res) => {
     
     if (offer.status !== "PENDING")
       return res.status(400).json({ error: "Offer cannot be accepted" });
-
+    
+    const jobPaymentType = offer.paymentType === "oneoff"
+      ? "ONE_OFF"
+      : "WEEKLY";
+    
     // Create job listing
     const job = await POWJob.create({
-      paymentType: offer.paymentType?.toUpperCase() || "WEEKLY",
+      paymentType: jobPaymentType,
       jobName: offer.task.taskName,
       jobDescription: offer.task.taskDescription,
       jobTags: offer.task.taskTags,
