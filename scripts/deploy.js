@@ -7,20 +7,33 @@ async function main() {
   const balance = await deployer.provider.getBalance(deployer.address);
   console.log("Deployer balance (ETH):", hre.ethers.formatEther(balance));
 
-  // Deploy DisputeDAO first
-  const DisputeDAOFactory = await hre.ethers.getContractFactory("DisputeDAO");
-  const disputeDAO = await DisputeDAOFactory.deploy(deployer.address);
-  await disputeDAO.waitForDeployment();
-  console.log("✅ DisputeDAO deployed at:", await disputeDAO.getAddress());
+  const disputeDAOAddress = "0xf4F50579bFaB4eac629B1F911Ab9532A9F17FaD6"; // pre-deployed DAO
 
-  // Deploy JobFactory with deployer as admin
   const Factory = await hre.ethers.getContractFactory("JobFactory");
-  const jobFactory = await Factory.deploy(deployer.address);
-  await jobFactory.waitForDeployment();
-  console.log("✅ JobFactory deployed at:", await jobFactory.getAddress());
+  console.log("JobFactory interface loaded:", Factory.interface.fragments.map(f => f.name || f.type));
+
+  try {
+    const deployTx = await Factory.getDeployTransaction(deployer.address, disputeDAOAddress);
+    console.log("Raw deploy TX:", deployTx);
+
+    const estimatedGas = await deployer.estimateGas(deployTx);
+    console.log("Estimated gas:", estimatedGas.toString());
+
+    deployTx.gasLimit = estimatedGas;
+
+    const sentTx = await deployer.sendTransaction(deployTx);
+    console.log("Sent raw TX:", sentTx.hash);
+
+    const receipt = await sentTx.wait();
+    console.log("✅ JobFactory deployed at:", receipt.contractAddress);
+  } catch (err) {
+    console.error("❌ Error during deployment:", err);
+  }
 }
 
-main().catch((error) => {
-  console.error("❌ Unhandled error:", error);
-  process.exitCode = 1;
-});
+main()
+  .then(() => process.exit(0))
+  .catch(err => {
+    console.error("❌ Unhandled error:", err);
+    process.exit(1);
+  });
