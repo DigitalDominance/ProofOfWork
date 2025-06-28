@@ -8,6 +8,7 @@ import "./DisputeDAO.sol";
 contract ProofOfWorkJob is ReentrancyGuard {
     enum PayType { WEEKLY, ONE_OFF }
     enum ApplicationStatus { PENDING, REVIEWED, REJECTED, ACCEPTED }
+    enum PaymentRequestStatus { NONE, PENDING, APPROVED, REJECTED }
 
     PayType public immutable payType;
     address public immutable employer;
@@ -34,6 +35,24 @@ contract ProofOfWorkJob is ReentrancyGuard {
     
     bool public jobEnded = false;
     bool public jobCancelled = false;
+
+    // Payment request tracking
+    struct PaymentRequest {
+        address worker;
+        uint256 amount;
+        uint256 requestedAt;
+        uint256 weekNumber; // For weekly payments, 0 for one-off
+        string workDescription;
+        PaymentRequestStatus status;
+        uint256 processedAt;
+        string rejectionReason;
+    }
+
+    mapping(address => PaymentRequest) public currentPaymentRequest;
+    mapping(address => mapping(uint256 => bool)) public weeklyPaymentClaimed; // worker => week => claimed
+    mapping(address => bool) public oneOffPaymentClaimed;
+    
+    PaymentRequest[] public paymentRequestHistory;
 
     // Enhanced Applicant structure
     struct Applicant {
@@ -64,6 +83,9 @@ contract ProofOfWorkJob is ReentrancyGuard {
     event ApplicationAccepted(address indexed applicant);
     event ApplicationDeclined(address indexed applicant);
     event WorkerAssigned(address indexed worker);
+    event PaymentRequested(address indexed worker, uint256 amount, uint256 weekNumber, string workDescription);
+    event PaymentRequestApproved(address indexed worker, uint256 amount);
+    event PaymentRequestRejected(address indexed worker, string reason);
     event PaymentReleased(address indexed worker, uint256 amount);
     event OneOffPayment(address indexed worker, uint256 amount);
     event JobCompleted(address indexed worker);
@@ -116,7 +138,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
             tags.push(_tags[i]);
         }        
 
-        reputation = new ReputationSystem(address(this));
+        reputation = new ReputationSystem{value: 0}(address(this));
         disputeDAO = DisputeDAO(_disputeDAO);
     }
 
@@ -598,6 +620,275 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit WorkerAssigned(worker);
     }
 
+    // ==================== PAYMENT REQUEST FUNCTIONS ====================
+
+    /**
+     * @dev Request weekly payment (called by worker)
+     * @param workDescription Description of work completed
+     */
+    function requestWeeklyPayment(string memory workDescription) external jobNotCancelled {
+        require(payType == PayType.WEEKLY, "Not weekly job");
+        require(isWorker[msg.sender], "Not assigned worker");
+        require(activeWorker[msg.sender], "Inactive worker");
+        require(currentPaymentRequest[msg.sender].status == PaymentRequestStatus.NONE, "Pending request exists");
+        require(block.timestamp >= lastPayoutAt + 1 weeks, "Too soon for next payment");
+        require(payoutsMade < durationWeeks, "All payments completed");
+        require(bytes(workDescription).length > 0, "Work description required");
+
+        uint256 currentWeek = payoutsMade + 1;
+        require(!weeklyPaymentClaimed[msg.sender][currentWeek], "Week already claimed");
+
+        currentPaymentRequest[msg.sender] = PaymentRequest({
+            worker: msg.sender,
+            amount: weeklyPay,
+            requestedAt: block.timestamp,
+            weekNumber: currentWeek,
+            workDescription: workDescription,
+            status: PaymentRequestStatus.PENDING,
+            processedAt: 0,
+            rejectionReason: ""
+        });
+
+        emit PaymentRequested(msg.sender, weeklyPay, currentWeek, workDescription);
+    }
+
+    /**
+     * @dev Request one-off payment (called by worker)
+     * @param workDescription Description of work completed
+     */
+    function requestOneOffPayment(string memory workDescription) external jobNotCancelled {
+        require(payType == PayType.ONE_OFF, "Not one-off job");
+        require(isWorker[msg.sender], "Not assigned worker");
+        require(activeWorker[msg.sender], "Inactive worker");
+        require(currentPaymentRequest[msg.sender].status == PaymentRequestStatus.NONE, "Pending request exists");
+        require(!oneOffPaymentClaimed[msg.sender], "Payment already claimed");
+        require(bytes(workDescription).length > 0, "Work description required");
+
+        currentPaymentRequest[msg.sender] = PaymentRequest({
+            worker: msg.sender,
+            amount: totalPay,
+            requestedAt: block.timestamp,
+            weekNumber: 0, // Not applicable for one-off
+            workDescription: workDescription,
+            status: PaymentRequestStatus.PENDING,
+            processedAt: 0,
+            rejectionReason: ""
+        });
+
+        emit PaymentRequested(msg.sender, totalPay, 0, workDescription);
+    }
+
+    /**
+     * @dev Approve payment request (called by employer)
+     * @param worker The worker's address
+     */
+    function approvePaymentRequest(address worker) external onlyEmployer nonReentrant jobNotCancelled {
+        require(isWorker[worker], "Not assigned worker");
+        require(currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING, "No pending request");
+
+        PaymentRequest storage request = currentPaymentRequest[worker];
+        request.status = PaymentRequestStatus.APPROVED;
+        request.processedAt = block.timestamp;
+
+        // Process the payment
+        uint256 amount = request.amount;
+        
+        if (payType == PayType.WEEKLY) {
+            require(block.timestamp >= lastPayoutAt + 1 weeks, "Too soon for payment");
+            require(payoutsMade < durationWeeks, "All payments completed");
+            require(!weeklyPaymentClaimed[worker][request.weekNumber], "Week already claimed");
+            
+            weeklyPaymentClaimed[worker][request.weekNumber] = true;
+            lastPayoutAt = block.timestamp;
+            payoutsMade++;
+            
+            // Mark as completed if this is the final payout
+            if (payoutsMade == durationWeeks) {
+                hasCompletedJob[worker] = true;
+            }
+        } else {
+            require(!oneOffPaymentClaimed[worker], "Payment already claimed");
+            oneOffPaymentClaimed[worker] = true;
+            hasCompletedJob[worker] = true;
+        }
+
+        // Transfer payment
+        (bool success, ) = payable(worker).call{value: amount}("");
+        require(success, "Payment transfer failed");
+
+        // Update reputation
+        reputation.updateWorker(worker, 1);
+
+        // Add to history and clear current request
+        paymentRequestHistory.push(request);
+        delete currentPaymentRequest[worker];
+
+        emit PaymentRequestApproved(worker, amount);
+        emit PaymentReleased(worker, amount);
+        
+        if (payType == PayType.ONE_OFF) {
+            emit OneOffPayment(worker, amount);
+            emit JobCompleted(worker);
+        }
+    }
+
+    /**
+     * @dev Reject payment request (called by employer)
+     * @param worker The worker's address
+     * @param reason Reason for rejection
+     */
+    function rejectPaymentRequest(address worker, string memory reason) external onlyEmployer jobNotCancelled {
+        require(isWorker[worker], "Not assigned worker");
+        require(currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING, "No pending request");
+        require(bytes(reason).length > 0, "Rejection reason required");
+
+        PaymentRequest storage request = currentPaymentRequest[worker];
+        request.status = PaymentRequestStatus.REJECTED;
+        request.processedAt = block.timestamp;
+        request.rejectionReason = reason;
+
+        // Add to history and clear current request
+        paymentRequestHistory.push(request);
+        delete currentPaymentRequest[worker];
+
+        emit PaymentRequestRejected(worker, reason);
+    }
+
+    /**
+     * @dev Cancel payment request (called by worker)
+     */
+    function cancelPaymentRequest() external jobNotCancelled {
+        require(isWorker[msg.sender], "Not assigned worker");
+        require(currentPaymentRequest[msg.sender].status == PaymentRequestStatus.PENDING, "No pending request");
+
+        delete currentPaymentRequest[msg.sender];
+    }
+
+    /**
+     * @dev Get all pending payment requests (for employer dashboard)
+     */
+    function getPendingPaymentRequests() external view returns (address[] memory) {
+        uint256 count = 0;
+        
+        // Count pending requests
+        for (uint256 i = 0; i < assignedWorkers.length; i++) {
+            address worker = assignedWorkers[i];
+            if (currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING) {
+                count++;
+            }
+        }
+
+        address[] memory pendingWorkers = new address[](count);
+        uint256 index = 0;
+        
+        // Fill array
+        for (uint256 i = 0; i < assignedWorkers.length; i++) {
+            address worker = assignedWorkers[i];
+            if (currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING) {
+                pendingWorkers[index] = worker;
+                index++;
+            }
+        }
+
+        return pendingWorkers;
+    }
+
+    /**
+     * @dev Get payment request details
+     */
+    function getPaymentRequest(address worker) external view returns (
+        address workerAddr,
+        uint256 amount,
+        uint256 requestedAt,
+        uint256 weekNumber,
+        string memory workDescription,
+        PaymentRequestStatus status,
+        uint256 processedAt,
+        string memory rejectionReason
+    ) {
+        PaymentRequest memory request = currentPaymentRequest[worker];
+        return (
+            request.worker,
+            request.amount,
+            request.requestedAt,
+            request.weekNumber,
+            request.workDescription,
+            request.status,
+            request.processedAt,
+            request.rejectionReason
+        );
+    }
+
+    /**
+     * @dev Get payment request history count
+     */
+    function getPaymentRequestHistoryCount() external view returns (uint256) {
+        return paymentRequestHistory.length;
+    }
+
+    /**
+     * @dev Get payment request from history
+     */
+    function getPaymentRequestHistory(uint256 index) external view returns (
+        address workerAddr,
+        uint256 amount,
+        uint256 requestedAt,
+        uint256 weekNumber,
+        string memory workDescription,
+        PaymentRequestStatus status,
+        uint256 processedAt,
+        string memory rejectionReason
+    ) {
+        require(index < paymentRequestHistory.length, "Index out of bounds");
+        PaymentRequest memory request = paymentRequestHistory[index];
+        return (
+            request.worker,
+            request.amount,
+            request.requestedAt,
+            request.weekNumber,
+            request.workDescription,
+            request.status,
+            request.processedAt,
+            request.rejectionReason
+        );
+    }
+
+    /**
+     * @dev Check if worker can request payment
+     */
+    function canRequestPayment(address worker) external view returns (bool, string memory) {
+        if (!isWorker[worker]) {
+            return (false, "Not assigned worker");
+        }
+        
+        if (!activeWorker[worker]) {
+            return (false, "Inactive worker");
+        }
+        
+        if (currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING) {
+            return (false, "Payment request already pending");
+        }
+        
+        if (payType == PayType.WEEKLY) {
+            if (block.timestamp < lastPayoutAt + 1 weeks) {
+                return (false, "Too soon for next weekly payment");
+            }
+            if (payoutsMade >= durationWeeks) {
+                return (false, "All weekly payments completed");
+            }
+            uint256 nextWeek = payoutsMade + 1;
+            if (weeklyPaymentClaimed[worker][nextWeek]) {
+                return (false, "Week already claimed");
+            }
+        } else {
+            if (oneOffPaymentClaimed[worker]) {
+                return (false, "One-off payment already claimed");
+            }
+        }
+        
+        return (true, "Can request payment");
+    }
+
     // ==================== WORKER FUNCTIONS ====================
 
     function getAssignedWorkers() external view returns (address[] memory) {
@@ -609,51 +900,159 @@ contract ProofOfWorkJob is ReentrancyGuard {
         activeWorker[msg.sender] = active;
     }
 
-    function releaseWeekly() external nonReentrant jobNotCancelled {
-        require(payType == PayType.WEEKLY, "Not weekly");
-        require(block.timestamp >= lastPayoutAt + 1 weeks, "Too soon");
-        require(payoutsMade < durationWeeks, "All paid");
-
-        lastPayoutAt = block.timestamp;
-        payoutsMade++;
-
-        uint256 amount = weeklyPay;
-        address payable w = payable(msg.sender);
-        require(activeWorker[w], "Inactive");
-
-        (bool s,) = w.call{value: amount}("");
-        require(s, "Pay failed");
-
-        reputation.updateWorker(w, 1);
-        
-        // Mark as completed if this is the final payout
-        if (payoutsMade == durationWeeks) {
-            hasCompletedJob[w] = true;
-        }
-        
-        emit PaymentReleased(w, amount);
+    /**
+     * @dev Legacy function - now redirects to request payment
+     * @deprecated Use requestWeeklyPayment instead
+     */
+    function releaseWeekly() external view {
+        revert("Use requestWeeklyPayment instead");
     }
 
-    function releaseOneOff() external nonReentrant jobNotCancelled {
-        require(payType == PayType.ONE_OFF, "Not one-off");
-        require(isWorker[msg.sender], "Not assigned");
-        require(activeWorker[msg.sender], "Inactive");
-
-        uint256 amount = totalPay;
-        address payable w = payable(msg.sender);
-
-        (bool s,) = w.call{value: amount}("");
-        require(s, "Pay failed");
-
-        reputation.updateWorker(w, 1);
-        hasCompletedJob[w] = true;
-        
-        emit OneOffPayment(w, amount);
-        emit JobCompleted(w);
+    /**
+     * @dev Legacy function - now redirects to request payment
+     * @deprecated Use requestOneOffPayment instead
+     */
+    function releaseOneOff() external view {
+        revert("Use requestOneOffPayment instead");
     }
 
     function openDispute(string calldata reason) external jobNotCancelled {
         uint256 id = disputeDAO.createDispute(address(this), reason);
         emit DisputeOpened(msg.sender, id, reason);
+    }
+
+    // ==================== VIEW FUNCTIONS ====================
+
+    /**
+     * @dev Get job summary information
+     */
+    function getJobSummary() external view returns (
+        address jobEmployer,
+        PayType jobPayType,
+        uint256 jobWeeklyPay,
+        uint256 jobTotalPay,
+        uint256 jobDurationWeeks,
+        uint256 jobPositions,
+        uint256 jobPayoutsMade,
+        bool jobIsEnded,
+        bool jobIsCancelled,
+        uint256 jobCreatedAt
+    ) {
+        return (
+            employer,
+            payType,
+            weeklyPay,
+            totalPay,
+            durationWeeks,
+            positions,
+            payoutsMade,
+            jobEnded,
+            jobCancelled,
+            createdAt
+        );
+    }
+
+    /**
+     * @dev Get worker status for a specific address
+     */
+    function getWorkerStatus(address worker) external view returns (
+        bool isAssignedWorker,
+        bool isActiveWorker,
+        bool hasCompleted,
+        bool hasRatedEmployerBool,
+        bool employerHasRatedWorkerBool,
+        PaymentRequestStatus currentRequestStatus
+    ) {
+        return (
+            isWorker[worker],
+            activeWorker[worker],
+            hasCompletedJob[worker],
+            hasRatedEmployer[worker],
+            employerHasRatedWorker[worker],
+            currentPaymentRequest[worker].status
+        );
+    }
+
+    /**
+     * @dev Get payment status for a worker
+     */
+    function getPaymentStatus(address worker) external view returns (
+        bool canRequest,
+        uint256 nextWeekNumber,
+        bool hasClaimedOneOff,
+        uint256 totalWeeksClaimed
+    ) {
+        (bool canReq, ) = this.canRequestPayment(worker);
+        
+        uint256 weeksClaimed = 0;
+        if (payType == PayType.WEEKLY) {
+            for (uint256 i = 1; i <= durationWeeks; i++) {
+                if (weeklyPaymentClaimed[worker][i]) {
+                    weeksClaimed++;
+                }
+            }
+        }
+        
+        return (
+            canReq,
+            payoutsMade + 1,
+            oneOffPaymentClaimed[worker],
+            weeksClaimed
+        );
+    }
+
+    /**
+     * @dev Get contract balance
+     */
+    function getContractBalance() external view returns (uint256) {
+        return address(this).balance;
+    }
+
+    /**
+     * @dev Get tags array
+     */
+    function getTags() external view returns (string[] memory) {
+        return tags;
+    }
+
+    /**
+     * @dev Get remaining payment amount
+     */
+    function getRemainingPayment() external view returns (uint256) {
+        if (payType == PayType.WEEKLY) {
+            uint256 remainingWeeks = durationWeeks - payoutsMade;
+            return remainingWeeks * weeklyPay;
+        } else {
+            // For one-off jobs, check if any worker has claimed
+            for (uint256 i = 0; i < assignedWorkers.length; i++) {
+                if (oneOffPaymentClaimed[assignedWorkers[i]]) {
+                    return 0;
+                }
+            }
+            return totalPay;
+        }
+    }
+
+    // ==================== EMERGENCY FUNCTIONS ====================
+
+    /**
+     * @dev Emergency function to withdraw funds (only admin)
+     * Should only be used in extreme circumstances
+     */
+    function emergencyWithdraw() external onlyAdmin nonReentrant {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No funds to withdraw");
+        
+        (bool success, ) = payable(ADMIN).call{value: balance}("");
+        require(success, "Emergency withdrawal failed");
+    }
+
+    // ==================== RECEIVE FUNCTION ====================
+
+    /**
+     * @dev Allow contract to receive ETH
+     */
+    receive() external payable {
+        // Contract can receive additional funding
     }
 }
