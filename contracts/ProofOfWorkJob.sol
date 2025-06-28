@@ -89,17 +89,17 @@ contract ProofOfWorkJob is ReentrancyGuard {
     event JobCancelled(uint256 refundAmount);
 
     modifier onlyEmployer() {
-        require(msg.sender == employer, "Only employer");
+        require(msg.sender == employer);
         _;
     }
 
     modifier onlyAdmin() {
-        require(msg.sender == ADMIN, "Only admin");
+        require(msg.sender == ADMIN);
         _;
     }
 
     modifier jobNotCancelled() {
-        require(!jobCancelled, "Job has been cancelled");
+        require(!jobCancelled);
         _;
     }
 
@@ -136,16 +136,16 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function cancelJob() external onlyEmployer nonReentrant {
-        require(!jobCancelled, "Job already cancelled");
-        require(assignedWorkers.length == 0, "Cannot cancel job with assigned workers");
-        require(payoutsMade == 0, "Cannot cancel job with payments made");
+        require(!jobCancelled);
+        require(assignedWorkers.length == 0);
+        require(payoutsMade == 0);
 
         jobCancelled = true;
         uint256 refundAmount = address(this).balance;
 
         if (refundAmount > 0) {
             (bool success, ) = payable(employer).call{value: refundAmount}("");
-            require(success, "Refund failed");
+            require(success);
         }
 
         emit JobCancelled(refundAmount);
@@ -162,9 +162,9 @@ contract ProofOfWorkJob is ReentrancyGuard {
         uint8 score
     ) external onlyEmployer jobNotCancelled {
         require(isWorker[worker], "Not a worker");
-        require(hasCompletedJob[worker] || jobEnded, "Worker hasn't completed job");
-        require(!employerHasRatedWorker[worker], "Already rated this worker");
-        require(score >= 1 && score <= 5, "Score must be 1-5");
+        require(hasCompletedJob[worker] || jobEnded);
+        require(!employerHasRatedWorker[worker]);
+        require(score >= 1 && score <= 5);
 
         employerHasRatedWorker[worker] = true;
         reputation.submitRating(worker, score);
@@ -175,10 +175,10 @@ contract ProofOfWorkJob is ReentrancyGuard {
     function rateEmployer(
         uint8 score
     ) external jobNotCancelled {
-        require(isWorker[msg.sender], "Not a worker");
-        require(hasCompletedJob[msg.sender] || jobEnded, "Haven't completed job");
-        require(!hasRatedEmployer[msg.sender], "Already rated employer");
-        require(score >= 1 && score <= 5, "Score must be 1-5");
+        require(isWorker[msg.sender]);
+        require(hasCompletedJob[msg.sender] || jobEnded);
+        require(!hasRatedEmployer[msg.sender]);
+        require(score >= 1 && score <= 5);
 
         hasRatedEmployer[msg.sender] = true;
         reputation.submitRating(employer, score);
@@ -206,10 +206,10 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function submitApplication(string memory _application) external jobNotCancelled {
-        require(bytes(_application).length > 0, "Application cannot be empty");
-        require(!hasApplied[msg.sender], "Already applied");
-        require(!isWorker[msg.sender], "Already assigned as worker");
-        require(assignedWorkers.length < positions, "All positions filled");
+        require(bytes(_application).length > 0);
+        require(!hasApplied[msg.sender]);
+        require(!isWorker[msg.sender]);
+        require(assignedWorkers.length < positions);
 
         applicants[msg.sender] = Applicant({
             applicantAddress: msg.sender,
@@ -228,9 +228,9 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function withdrawApplication() external {
-        require(hasApplied[msg.sender], "No application found");
-        require(applicants[msg.sender].isActive, "Application already inactive");
-        require(!isWorker[msg.sender], "Already assigned as worker");
+        require(hasApplied[msg.sender]);
+        require(applicants[msg.sender].isActive);
+        require(!isWorker[msg.sender]);
 
         applicants[msg.sender].isActive = false;
 
@@ -238,10 +238,10 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function acceptApplication(address applicant) external onlyEmployer jobNotCancelled {
-        require(hasApplied[applicant], "No application found");
-        require(applicants[applicant].isActive, "Application not active");
-        require(!isWorker[applicant], "Already assigned as worker");
-        require(assignedWorkers.length < positions, "Max positions filled");
+        require(hasApplied[applicant]);
+        require(applicants[applicant].isActive);
+        require(!isWorker[applicant]);
+        require(assignedWorkers.length < positions);
 
         applicants[applicant].status = ApplicationStatus.REVIEWED;
         applicants[applicant].reviewedAt = block.timestamp;
@@ -257,9 +257,9 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function declineApplication(address applicant) external onlyEmployer jobNotCancelled {
-        require(hasApplied[applicant], "No application found");
-        require(applicants[applicant].isActive, "Application not active");
-        require(!isWorker[applicant], "Already assigned as worker");
+        require(hasApplied[applicant]);
+        require(applicants[applicant].isActive);
+        require(!isWorker[applicant]);
 
         applicants[applicant].status = ApplicationStatus.REVIEWED;
         applicants[applicant].reviewedAt = block.timestamp;
@@ -290,7 +290,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function getApplicationStatusString(address _applicant) external view returns (string memory) {
-        require(hasApplied[_applicant], "No application found");
+        require(hasApplied[_applicant]);
         ApplicationStatus status = applicants[_applicant].status;
         if (status == ApplicationStatus.PENDING) return "Pending";
         if (status == ApplicationStatus.REVIEWED) {
@@ -310,9 +310,9 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function assignWorkerDirect(address worker) external onlyEmployer jobNotCancelled {
-        require(worker != address(0), "Bad worker");
-        require(!isWorker[worker], "Already assigned");
-        require(assignedWorkers.length < positions, "Max positions filled");
+        require(worker != address(0));
+        require(!isWorker[worker]);
+        require(assignedWorkers.length < positions);
 
         isWorker[worker] = true;
         activeWorker[worker] = true;
@@ -332,16 +332,16 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function requestWeeklyPayment(string memory workDescription) external jobNotCancelled {
-        require(payType == PayType.WEEKLY, "Not weekly job");
-        require(isWorker[msg.sender], "Not assigned worker");
-        require(activeWorker[msg.sender], "Inactive worker");
-        require(currentPaymentRequest[msg.sender].status == PaymentRequestStatus.NONE, "Pending request exists");
-        require(block.timestamp >= lastPayoutAt + 1 weeks, "Too soon for next payment");
-        require(payoutsMade < durationWeeks, "All payments completed");
-        require(bytes(workDescription).length > 0, "Work description required");
+        require(payType == PayType.WEEKLY);
+        require(isWorker[msg.sender]);
+        require(activeWorker[msg.sender]);
+        require(currentPaymentRequest[msg.sender].status == PaymentRequestStatus.NONE);
+        require(block.timestamp >= lastPayoutAt + 1 weeks);
+        require(payoutsMade < durationWeeks);
+        require(bytes(workDescription).length > 0);
 
         uint256 currentWeek = payoutsMade + 1;
-        require(!weeklyPaymentClaimed[msg.sender][currentWeek], "Week already claimed");
+        require(!weeklyPaymentClaimed[msg.sender][currentWeek]);
 
         currentPaymentRequest[msg.sender] = PaymentRequest({
             worker: msg.sender,
@@ -358,12 +358,12 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function requestOneOffPayment(string memory workDescription) external jobNotCancelled {
-        require(payType == PayType.ONE_OFF, "Not one-off job");
-        require(isWorker[msg.sender], "Not assigned worker");
-        require(activeWorker[msg.sender], "Inactive worker");
+        require(payType == PayType.ONE_OFF);
+        require(isWorker[msg.sender]);
+        require(activeWorker[msg.sender]);
         require(currentPaymentRequest[msg.sender].status == PaymentRequestStatus.NONE, "Pending request exists");
-        require(!oneOffPaymentClaimed[msg.sender], "Payment already claimed");
-        require(bytes(workDescription).length > 0, "Work description required");
+        require(!oneOffPaymentClaimed[msg.sender]);
+        require(bytes(workDescription).length > 0);
 
         currentPaymentRequest[msg.sender] = PaymentRequest({
             worker: msg.sender,
@@ -380,8 +380,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function approvePaymentRequest(address worker) external onlyEmployer nonReentrant jobNotCancelled {
-        require(isWorker[worker], "Not assigned worker");
-        require(currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING, "No pending request");
+        require(isWorker[worker]);
+        require(currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING);
 
         PaymentRequest storage request = currentPaymentRequest[worker];
         request.status = PaymentRequestStatus.APPROVED;
@@ -390,9 +390,9 @@ contract ProofOfWorkJob is ReentrancyGuard {
         uint256 amount = request.amount;
         
         if (payType == PayType.WEEKLY) {
-            require(block.timestamp >= lastPayoutAt + 1 weeks, "Too soon for payment");
-            require(payoutsMade < durationWeeks, "All payments completed");
-            require(!weeklyPaymentClaimed[worker][request.weekNumber], "Week already claimed");
+            require(block.timestamp >= lastPayoutAt + 1 weeks);
+            require(payoutsMade < durationWeeks");
+            require(!weeklyPaymentClaimed[worker][request.weekNumber]);
             
             weeklyPaymentClaimed[worker][request.weekNumber] = true;
             lastPayoutAt = block.timestamp;
@@ -402,13 +402,13 @@ contract ProofOfWorkJob is ReentrancyGuard {
                 hasCompletedJob[worker] = true;
             }
         } else {
-            require(!oneOffPaymentClaimed[worker], "Payment already claimed");
+            require(!oneOffPaymentClaimed[worker]);
             oneOffPaymentClaimed[worker] = true;
             hasCompletedJob[worker] = true;
         }
 
         (bool success, ) = payable(worker).call{value: amount}("");
-        require(success, "Payment transfer failed");
+        require(success);
 
         reputation.updateWorker(worker, 1);
 
@@ -425,9 +425,9 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function rejectPaymentRequest(address worker, string memory reason) external onlyEmployer jobNotCancelled {
-        require(isWorker[worker], "Not assigned worker");
-        require(currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING, "No pending request");
-        require(bytes(reason).length > 0, "Rejection reason required");
+        require(isWorker[worker]);
+        require(currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING);
+        require(bytes(reason).length > 0);
 
         PaymentRequest storage request = currentPaymentRequest[worker];
         request.status = PaymentRequestStatus.REJECTED;
@@ -441,8 +441,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
     }
 
     function cancelPaymentRequest() external jobNotCancelled {
-        require(isWorker[msg.sender], "Not assigned worker");
-        require(currentPaymentRequest[msg.sender].status == PaymentRequestStatus.PENDING, "No pending request");
+        require(isWorker[msg.sender]);
+        require(currentPaymentRequest[msg.sender].status == PaymentRequestStatus.PENDING);
 
         delete currentPaymentRequest[msg.sender];
     }
@@ -471,39 +471,39 @@ contract ProofOfWorkJob is ReentrancyGuard {
 
     function canRequestPayment(address worker) external view returns (bool, string memory) {
         if (!isWorker[worker]) {
-            return (false, "Not assigned worker");
+            return (false);
         }
         
         if (!activeWorker[worker]) {
-            return (false, "Inactive worker");
+            return (false);
         }
         
         if (currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING) {
-            return (false, "Payment request already pending");
+            return (false);
         }
         
         if (payType == PayType.WEEKLY) {
             if (block.timestamp < lastPayoutAt + 1 weeks) {
-                return (false, "Too soon for next weekly payment");
+                return (false);
             }
             if (payoutsMade >= durationWeeks) {
-                return (false, "All weekly payments completed");
+                return (false);
             }
             uint256 nextWeek = payoutsMade + 1;
             if (weeklyPaymentClaimed[worker][nextWeek]) {
-                return (false, "Week already claimed");
+                return (false);
             }
         } else {
             if (oneOffPaymentClaimed[worker]) {
-                return (false, "One-off payment already claimed");
+                return (false);
             }
         }
         
-        return (true, "Can request payment");
+        return (true);
     }
 
     function setActive(bool active) external jobNotCancelled {
-        require(isWorker[msg.sender], "Not worker");
+        require(isWorker[msg.sender]);
         activeWorker[msg.sender] = active;
     }
 
