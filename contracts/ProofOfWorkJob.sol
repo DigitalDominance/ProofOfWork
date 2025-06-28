@@ -269,26 +269,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit ApplicationDeclined(applicant);
     }
 
-    function getApplicationsByStatus(ApplicationStatus status) external view returns (address[] memory) {
-        uint256 count = 0;
-        for (uint256 i = 0; i < applicantAddresses.length; i++) {
-            if (applicants[applicantAddresses[i]].status == status) {
-                count++;
-            }
-        }
-
-        address[] memory result = new address[](count);
-        uint256 index = 0;
-        for (uint256 i = 0; i < applicantAddresses.length; i++) {
-            address applicantAddr = applicantAddresses[i];
-            if (applicants[applicantAddr].status == status) {
-                result[index] = applicantAddr;
-                index++;
-            }
-        }
-        return result;
-    }
-
     function getActiveApplicants() external view returns (address[] memory) {
         uint256 activeCount = 0;
         for (uint256 i = 0; i < applicantAddresses.length; i++) {
@@ -307,28 +287,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
             }
         }
         return activeApplicants;
-    }
-
-    function getApplicant(address _applicant) external view returns (
-        address applicantAddress,
-        string memory application,
-        uint256 appliedAt,
-        bool isActive,
-        ApplicationStatus status,
-        uint256 reviewedAt,
-        bool wasAccepted
-    ) {
-        require(hasApplied[_applicant], "No application found");
-        Applicant memory applicant = applicants[_applicant];
-        return (
-            applicant.applicantAddress,
-            applicant.application,
-            applicant.appliedAt,
-            applicant.isActive,
-            applicant.status,
-            applicant.reviewedAt,
-            applicant.wasAccepted
-        );
     }
 
     function getApplicationStatusString(address _applicant) external view returns (string memory) {
