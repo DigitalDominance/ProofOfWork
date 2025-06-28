@@ -93,7 +93,8 @@ const POWTask = mongoose.model("POWTask", taskSchema);
 const offerSchema = new mongoose.Schema({
   task:             { type: mongoose.Schema.Types.ObjectId, ref: "POWTask", required: true },
   employerAddress:  { type: String, required: true },
-  status:           { type: String, enum: ["PENDING", "DECLINED", "ACCEPTED"], default: "PENDING" },
+  workerAddress:    { type: String, required: true },           // ← new
+  status:           { type: String, enum: ["PENDING","DECLINED","ACCEPTED"], default: "PENDING" },
   createdAt:        { type: Date, default: Date.now },
 });
 const POWOffer = mongoose.model("POWOffer", offerSchema);
@@ -314,6 +315,7 @@ app.delete("/api/tasks/:taskId", requireAuth, async (req, res) => {
 });
 
 // ─── OFFER ENDPOINTS ──────────────────────────────────────────────────────────
+// Create an offer (employer → worker)
 app.post("/api/tasks/:taskId/offers", requireAuth, async (req, res) => {
   if (req.user.role !== "employer")
     return res.status(403).json({ error: "Only employers can make offers" });
@@ -324,9 +326,11 @@ app.post("/api/tasks/:taskId/offers", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "Task is not open for offers" });
 
   const offer = await POWOffer.create({
-    task: task._id,
-    employerAddress: req.user.wallet
+    task:            task._id,
+    employerAddress: req.user.wallet,
+    workerAddress:   task.workerAddress,            // ← populate
   });
+
   task.status = "OFFERED";
   await task.save();
   res.status(201).json(offer);
@@ -359,6 +363,29 @@ app.post("/api/offers/:offerId/job", requireAuth, async (req, res) => {
   await offer.task.save();
 
   res.status(201).json(job);
+});
+
+// **New**: Fetch offers by employer or by worker
+app.get("/api/offers", requireAuth, async (req, res) => {
+  const { employerAddress, workerAddress } = req.query;
+  if (!employerAddress && !workerAddress) {
+    return res.status(400).json({ error: "Provide employerAddress or workerAddress" });
+  }
+
+  const filter: any = {};
+  if (employerAddress) filter.employerAddress = employerAddress;
+  if (workerAddress)   filter.workerAddress   = workerAddress;
+
+  try {
+    const offers = await POWOffer
+      .find(filter)
+      .populate("task")
+      .sort({ createdAt: -1 });
+    res.json(offers);
+  } catch (e) {
+    console.error("Fetch offers error:", e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── DISPUTE MESSAGING ────────────────────────────────────────────────────────
