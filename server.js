@@ -85,6 +85,8 @@ const taskSchema = new mongoose.Schema({
   taskDescription: { type: String, required: true },
   taskTags:        { type: [String], default: [] },
   workerAddress:   { type: String, required: true },
+  kasAmount:       { type: String }, // Add this field
+  paymentType:     { type: String, enum: ["oneoff"], default: "oneoff" }, // Add this
   status:          { type: String, enum: ["OPEN", "OFFERED", "CONVERTED"], default: "OPEN" },
   createdAt:       { type: Date, default: Date.now },
 });
