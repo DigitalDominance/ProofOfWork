@@ -318,24 +318,30 @@ app.delete("/api/tasks/:taskId", requireAuth, async (req, res) => {
 });
 
 // ─── OFFER ENDPOINTS ──────────────────────────────────────────────────────────
-// Create an offer (employer → worker)
 app.post("/api/tasks/:taskId/offers", requireAuth, async (req, res) => {
   if (req.user.role !== "employer")
     return res.status(403).json({ error: "Only employers can make offers" });
 
   const task = await POWTask.findById(req.params.taskId);
   if (!task) return res.status(404).json({ error: "Task not found" });
+
   if (task.status !== "OPEN")
     return res.status(400).json({ error: "Task is not open for offers" });
+
+  const { kasAmount, paymentType, duration } = req.body; // Get offer details
 
   const offer = await POWOffer.create({
     task:            task._id,
     employerAddress: req.user.wallet,
-    workerAddress:   task.workerAddress,            // ← populate
+    workerAddress:   task.workerAddress, // Add worker address
+    kasAmount,       // Add offer details
+    paymentType,
+    duration,
   });
 
   task.status = "OFFERED";
   await task.save();
+
   res.status(201).json(offer);
 });
 
