@@ -169,7 +169,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
             tags.push(_tags[i]);
         }        
 
-        reputation = new ReputationSystem(address(this));
+        reputation = new ReputationSystem{value: 0}(address(this));
         disputeDAO = DisputeDAO(_disputeDAO);
     }
 
@@ -509,35 +509,35 @@ contract ProofOfWorkJob is ReentrancyGuard {
 
     function canRequestPayment(address worker) external view returns (bool, string memory) {
         if (!isWorker[worker]) {
-            return (false);
+            return (false, "Not assigned worker");
         }
         
         if (!activeWorker[worker]) {
-            return (false);
+            return (false, "Inactive worker");
         }
         
         if (currentPaymentRequest[worker].status == PaymentRequestStatus.PENDING) {
-            return (false);
+            return (false, "Payment request already pending");
         }
         
         if (payType == PayType.WEEKLY) {
             if (block.timestamp < lastPayoutAt + 1 weeks) {
-                return (false);
+                return (false, "Too soon for next weekly payment");
             }
             if (payoutsMade >= durationWeeks) {
-                return (false);
+                return (false, "All weekly payments completed");
             }
             uint256 nextWeek = payoutsMade + 1;
             if (weeklyPaymentClaimed[worker][nextWeek]) {
-                return (false);
+                return (false, "Week already claimed");
             }
         } else {
             if (oneOffPaymentClaimed[worker]) {
-                return (false);
+                return (false, "One-off payment already claimed");
             }
         }
         
-        return (true);
+        return (true, "Can request payment");
     }
 
     function setActive(bool active) external jobNotCancelled {
