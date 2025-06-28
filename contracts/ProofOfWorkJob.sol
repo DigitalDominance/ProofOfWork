@@ -164,7 +164,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         for (uint i = 0; i < _tags.length; i++) {
             tags.push(_tags[i]);
         }
-        reputation = new ReputationSystem{value: 0}(address(this));
+        reputation = new ReputationSystem(address(this));
         disputeDAO = DisputeDAO(_disputeDAO);
     }
 
