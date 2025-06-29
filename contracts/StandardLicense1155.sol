@@ -1,39 +1,36 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
+// ERC-1155 core
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";         
+// Reentrancy guard (now under utils in v5)
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            
+// Counters library
+import "@openzeppelin/contracts/utils/Counters.sol";                   
+// Ownable
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-/// @notice Soulbound ERC-1155 for multi-edition “standard” licenses.
+/// @notice Soulbound ERC-1155 for “standard” licenses (unlimited mints).
 contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
     using Counters for Counters.Counter;
     Counters.Counter private _assetIdCounter;
 
-    /// @dev Metadata URI per asset ID.
-    mapping(uint256 => string) private _uris;
-    /// @dev Price (in wei) per asset ID.
-    mapping(uint256 => uint256) public pricePerAsset;
-    /// @dev Creator address per asset ID.
-    mapping(uint256 => address) public creatorOf;
-    /// @dev Holder enumeration.
+    mapping(uint256 => string)   private _uris;
+    mapping(uint256 => uint256)  public  pricePerAsset;
+    mapping(uint256 => address)  public  creatorOf;
     mapping(address => uint256[]) private _holderTokens;
     mapping(address => mapping(uint256 => bool)) private _holderTokenExists;
 
-    /// @dev Thrown on transfer attempts.
     error TransfersDisabled();
-    /// @dev Thrown when asset isn’t listed.
     error NotListed(uint256 id);
-    /// @dev Thrown on incorrect payment.
     error IncorrectPayment(uint256 required, uint256 provided);
 
     event AssetRegistered(uint256 indexed id, address indexed creator, string uri, uint256 price);
-    event AssetPurchased(address indexed buyer, uint256 indexed id, uint256 amount, uint256 price);
+    event AssetPurchased(uint256 indexed buyer,  uint256 indexed id,     uint256 amount, uint256 price);
 
     constructor() ERC1155("") {}
 
-    /// @notice Creators call to list a new standard asset.
+    /// @notice Creator lists a new standard asset.
     function registerStandardAsset(string calldata uri, uint256 price)
         external
         returns (uint256 id)
@@ -41,59 +38,53 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         id = _assetIdCounter.current();
         _assetIdCounter.increment();
 
-        _uris[id] = uri;
+        _uris[id]         = uri;
         pricePerAsset[id] = price;
-        creatorOf[id] = msg.sender;
+        creatorOf[id]     = msg.sender;
 
         emit AssetRegistered(id, msg.sender, uri, price);
     }
 
-    /// @notice Returns metadata URI for `id`.
+    /// @notice Metadata URI override.
     function uri(uint256 id) public view override returns (string memory) {
         return _uris[id];
     }
 
-    /// @notice Buyers call to mint `amount` licenses; unlimited supply.
+    /// @notice Unlimited-supply purchase → soulbound mint.
     function purchaseStandard(uint256 id, uint256 amount)
         external
         payable
         nonReentrant
     {
         uint256 price = pricePerAsset[id];
-        if (price == 0) revert NotListed(id);  // asset must be listed :contentReference[oaicite:5]{index=5}
+        if (price == 0)           revert NotListed(id);
         uint256 total = price * amount;
-        if (msg.value != total) revert IncorrectPayment(total, msg.value);
+        if (msg.value != total)   revert IncorrectPayment(total, msg.value);
 
-        // Record holder for enumeration
         if (!_holderTokenExists[msg.sender][id]) {
             _holderTokens[msg.sender].push(id);
             _holderTokenExists[msg.sender][id] = true;
         }
 
-        // Soulbound mint
         _mint(msg.sender, id, amount, "");
 
-        // Forward payment to creator
+        // forward funds
         (bool sent,) = payable(creatorOf[id]).call{value: msg.value}("");
         require(sent, "Payout failed");
 
         emit AssetPurchased(msg.sender, id, amount, price);
     }
 
-    /// @dev Disables all transfers after mint; allows only mint (from==0) or burn (to==0) :contentReference[oaicite:6]{index=6}
+    /// @dev Blocks any transfer except mint (from=0) or burn (to=0).
     function _beforeTokenTransfer(
-        address operator,
-        address from,
-        address to,
-        uint256[] memory ids,
-        uint256[] memory amounts,
-        bytes memory data
+        address, address from, address to,
+        uint256[] memory, uint256[] memory, bytes memory
     ) internal virtual override {
-        super._beforeTokenTransfer(operator, from, to, ids, amounts, data);
+        super._beforeTokenTransfer(msg.sender, from, to, new uint256, new uint256, "");
         if (from != address(0) && to != address(0)) revert TransfersDisabled();
     }
 
-    /// @notice View enrolled asset IDs for `account`.
+    /// @notice List of asset IDs owned by `account`.
     function tokensOfHolder(address account)
         external
         view
