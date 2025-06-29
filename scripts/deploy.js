@@ -1,3 +1,4 @@
+// scripts/deploy-licenses.js
 const hre = require("hardhat");
 
 async function main() {
@@ -5,35 +6,41 @@ async function main() {
   console.log("Deploying with:", deployer.address);
 
   const balance = await deployer.provider.getBalance(deployer.address);
-  console.log("Deployer balance (ETH):", hre.ethers.formatEther(balance));
+  console.log(
+    "Deployer balance (ETH):",
+    hre.ethers.formatEther(balance)
+  );
 
-  const disputeDAOAddress = "0xf4F50579bFaB4eac629B1F911Ab9532A9F17FaD6"; // pre-deployed DAO
+  // 1. Deploy StandardLicense1155
+  const Standard = await hre.ethers.getContractFactory("StandardLicense1155");
+  console.log(
+    "Deploying StandardLicense1155..."
+  );
+  // Pass an initial base URI—can be empty or e.g. "ipfs://<CID>/{id}.json"
+  const standard = await Standard.deploy("https://example.com/metadata/{id}.json");
+  await standard.deployed();
+  console.log(
+    "✅ StandardLicense1155 deployed at:",
+    standard.address
+  );
 
-  const Factory = await hre.ethers.getContractFactory("JobFactory");
-  console.log("JobFactory interface loaded:", Factory.interface.fragments.map(f => f.name || f.type));
-
-  try {
-    const deployTx = await Factory.getDeployTransaction(deployer.address, disputeDAOAddress);
-    console.log("Raw deploy TX:", deployTx);
-
-    const estimatedGas = await deployer.estimateGas(deployTx);
-    console.log("Estimated gas:", estimatedGas.toString());
-
-    deployTx.gasLimit = estimatedGas;
-
-    const sentTx = await deployer.sendTransaction(deployTx);
-    console.log("Sent raw TX:", sentTx.hash);
-
-    const receipt = await sentTx.wait();
-    console.log("✅ JobFactory deployed at:", receipt.contractAddress);
-  } catch (err) {
-    console.error("❌ Error during deployment:", err);
-  }
+  // 2. Deploy ExclusiveLicense721
+  const Exclusive = await hre.ethers.getContractFactory("ExclusiveLicense721");
+  console.log(
+    "Deploying ExclusiveLicense721..."
+  );
+  // Supply your desired name and symbol
+  const exclusive = await Exclusive.deploy("POWExclusiveAssets", "POWEXC");
+  await exclusive.deployed();
+  console.log(
+    "✅ ExclusiveLicense721 deployed at:",
+    exclusive.address
+  );
 }
 
 main()
   .then(() => process.exit(0))
-  .catch(err => {
-    console.error("❌ Unhandled error:", err);
+  .catch((err) => {
+    console.error("❌ Deployment error:", err);
     process.exit(1);
   });
