@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";               // ERC-721 core
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            // v5 reentrancy guard
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @notice Soulbound ERC-721 for one-off “exclusive” licenses.
@@ -22,7 +22,6 @@ contract ExclusiveLicense721 is ERC721, Ownable, ReentrancyGuard {
     event AssetRegisteredExclusive(uint256 indexed id, address indexed creator, string uri, uint256 price);
     event ExclusivePurchased(address indexed buyer, uint256 indexed id, uint256 price);
 
-    /// @dev Deployer becomes owner.
     constructor(string memory name_, string memory symbol_)
         ERC721(name_, symbol_)
         Ownable(msg.sender)
@@ -34,10 +33,10 @@ contract ExclusiveLicense721 is ERC721, Ownable, ReentrancyGuard {
         returns (uint256 id)
     {
         id = _nextAssetId++;
-        _tokenUris[id]    = uri;
+        _tokenUris[id]     = uri;
         pricePerAsset[id] = price;
-        creatorOf[id]     = msg.sender;
-        isListed[id]      = true;
+        creatorOf[id]      = msg.sender;
+        isListed[id]       = true;
         emit AssetRegisteredExclusive(id, msg.sender, uri, price);
     }
 
@@ -48,9 +47,9 @@ contract ExclusiveLicense721 is ERC721, Ownable, ReentrancyGuard {
 
     /// @notice Buyers mint the single soulbound NFT by paying `price`.
     function purchaseExclusive(uint256 id) external payable nonReentrant {
-        if (!isListed[id])       revert NotListed(id);
+        if (!isListed[id])      revert NotListed(id);
         uint256 price = pricePerAsset[id];
-        if (msg.value != price)  revert IncorrectPayment(price, msg.value);
+        if (msg.value != price) revert IncorrectPayment(price, msg.value);
 
         isListed[id] = false;
         _safeMint(msg.sender, id);
@@ -62,21 +61,16 @@ contract ExclusiveLicense721 is ERC721, Ownable, ReentrancyGuard {
         emit ExclusivePurchased(msg.sender, id, price);
     }
 
-    // — soulbound enforcement by disabling all transfer and approval APIs —
+    /// @dev Soulbound: block all transfers by overriding internal _transfer.
+    function _transfer(address, address, uint256) internal pure override {
+        revert TransfersDisabled();
+    }
 
+    /// @dev Also block approvals.
     function approve(address, uint256) public pure override {
         revert TransfersDisabled();
     }
     function setApprovalForAll(address, bool) public pure override {
-        revert TransfersDisabled();
-    }
-    function transferFrom(address, address, uint256) public pure override {
-        revert TransfersDisabled();
-    }
-    function safeTransferFrom(address, address, uint256) public pure override {
-        revert TransfersDisabled();
-    }
-    function safeTransferFrom(address, address, uint256, bytes memory) public pure override {
         revert TransfersDisabled();
     }
 
