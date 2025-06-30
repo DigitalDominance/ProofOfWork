@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";            // ERC-1155 core
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            // v5 guard
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @notice Soulbound ERC-1155 for multi-edition “standard” licenses.
@@ -36,12 +36,12 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         emit AssetRegistered(id, msg.sender, metadataUri, price);
     }
 
-    /// @notice Returns the metadata URI for `id`.
+    /// @notice Returns metadata URI for `id`.
     function uri(uint256 id) public view override returns (string memory) {
         return _uris[id];
     }
 
-    /// @notice Buyers mint unlimited soulbound copies by paying `price * amount`.
+    /// @notice Buyers mint unlimited soulbound copies by calling this.
     function purchaseStandard(uint256 id, uint256 amount)
         external
         payable
@@ -65,7 +65,7 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         emit AssetPurchased(msg.sender, id, amount, price);
     }
 
-    /// @dev Soulbound: blocks any transfer except mint (from==0) or burn (to==0).
+    /// @dev Blocks any transfer after mint; only mint (from==0) or burn (to==0) allowed.
     function _beforeTokenTransfer(
         address operator,
         address from,
@@ -80,7 +80,7 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         }
     }
 
-    /// @notice Returns all standard asset IDs ever purchased by `account`.
+    /// @notice Returns all asset IDs that `account` has ever purchased.
     function tokensOfHolder(address account) external view returns (uint256[] memory) {
         return _holderTokens[account];
     }
