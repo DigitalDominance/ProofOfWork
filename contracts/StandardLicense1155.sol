@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";             // :contentReference[oaicite:0]{index=0}
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";             // 
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";            // ERC-1155 core :contentReference[oaicite:0]{index=0}
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            // v5 path 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @notice Soulbound ERC-1155 for multi-edition “standard” licenses.
 contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
-    uint256 private _nextAssetId;                       // manual counter (Counters.sol removed in v5) :contentReference[oaicite:2]{index=2}
+    uint256 private nextAssetId;
 
-    mapping(uint256 => string)   private _uris;
+    mapping(uint256 => string)   private uris;
     mapping(uint256 => uint256)  public  pricePerAsset;
     mapping(uint256 => address)  public  creatorOf;
-    mapping(address => uint256[]) private _holderTokens;
-    mapping(address => mapping(uint256 => bool)) private _holderTokenExists;
+    mapping(address => uint256[]) private holderTokens;
+    mapping(address => mapping(uint256 => bool)) private holderTokenExists;
 
     error TransfersDisabled();
     error NotListed(uint256 id);
@@ -25,24 +25,24 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
     /// @dev Deployer becomes owner.
     constructor() ERC1155("") Ownable(msg.sender) {}
 
-    /// @notice Creator lists a new standard asset.
+    /// @notice Creators call to list a new standard asset.
     function registerStandardAsset(string calldata metadataUri, uint256 price)
         external
         returns (uint256 id)
     {
-        id = _nextAssetId++;
-        _uris[id]         = metadataUri;
+        id = nextAssetId++;
+        uris[id]         = metadataUri;
         pricePerAsset[id] = price;
         creatorOf[id]     = msg.sender;
         emit AssetRegistered(id, msg.sender, metadataUri, price);
     }
 
-    /// @notice Metadata URI override.
+    /// @notice Returns metadata URI for `id`.
     function uri(uint256 id) public view override returns (string memory) {
-        return _uris[id];
+        return uris[id];
     }
 
-    /// @notice Unlimited‐supply soulbound “purchase” → mint.
+    /// @notice Buyers call to mint unlimited soulbound copies.
     function purchaseStandard(uint256 id, uint256 amount)
         external
         payable
@@ -53,31 +53,36 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         uint256 total = price * amount;
         if (msg.value != total)   revert IncorrectPayment(total, msg.value);
 
-        if (!_holderTokenExists[msg.sender][id]) {
-            _holderTokens[msg.sender].push(id);
-            _holderTokenExists[msg.sender][id] = true;
+        if (!holderTokenExists[msg.sender][id]) {
+            holderTokens[msg.sender].push(id);
+            holderTokenExists[msg.sender][id] = true;
         }
 
         _mint(msg.sender, id, amount, "");
 
-        (bool sent,) = payable(creatorOf[id]).call{value: msg.value}("");
+        (bool sent, ) = payable(creatorOf[id]).call{value: msg.value}("");
         require(sent, "Payout failed");
 
         emit AssetPurchased(msg.sender, id, amount, price);
     }
 
-    /// @dev In v5 the transfer hooks are replaced by a single `_update` – we block any non-mint/burn transfers here.
-    function _update(address from, address to, uint256[] memory ids, uint256[] memory values)
-        internal
-        virtual
-        override
-    {
-        if (from != address(0) && to != address(0)) revert TransfersDisabled();
-        super._update(from, to, ids, values);
+    /// @dev v5 replaces all transfer/mint/burn hooks with a single `_update` hook.
+    function _update(
+        address from,
+        address to,
+        uint256[] memory ids,
+        uint256[] memory amounts,
+        bytes memory data
+    ) internal virtual override {
+        super._update(from, to, ids, amounts, data);
+        if (from != address(0) && to != address(0)) {
+            // only allow mint (from==0) or burn (to==0)
+            revert TransfersDisabled();
+        }
     }
 
-    /// @notice Get all asset IDs held by `account`.
+    /// @notice Get all standard asset IDs held by `account`.
     function tokensOfHolder(address account) external view returns (uint256[] memory) {
-        return _holderTokens[account];
+        return holderTokens[account];
     }
 }
