@@ -712,5 +712,4 @@ io.on("connection", (socket) => {
 app.get("/", (req, res) => res.send("🔥 ProofOfWork API is live!"));
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🌐 Listening on port ${
-
+server.listen(PORT, () => console.log(`🌐 Listening on port ${PORT}`));
