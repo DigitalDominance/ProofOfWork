@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";               // ERC-721 core
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            // Reentrancy guard (v5)
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";               // ERC-721 core :contentReference[oaicite:3]{index=3}
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            // v5 guard :contentReference[oaicite:4]{index=4}
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @notice Soulbound ERC-721 for one-off “exclusive” licenses.
@@ -22,7 +22,6 @@ contract ExclusiveLicense721 is ERC721, Ownable, ReentrancyGuard {
     event AssetRegisteredExclusive(uint256 indexed id, address indexed creator, string uri, uint256 price);
     event ExclusivePurchased(address indexed buyer, uint256 indexed id, uint256 price);
 
-    /// @dev Deployer becomes owner.
     constructor(string memory name_, string memory symbol_)
         ERC721(name_, symbol_)
         Ownable(msg.sender)
@@ -46,7 +45,7 @@ contract ExclusiveLicense721 is ERC721, Ownable, ReentrancyGuard {
         return _tokenUris[id];
     }
 
-    /// @notice Buyers mint their single soulbound NFT by paying `price`.
+    /// @notice Buyers mint their one and only exclusive soulbound NFT here.
     function purchaseExclusive(uint256 id) external payable nonReentrant {
         if (!isListed[id])      revert NotListed(id);
         uint256 price = pricePerAsset[id];
@@ -62,19 +61,21 @@ contract ExclusiveLicense721 is ERC721, Ownable, ReentrancyGuard {
         emit ExclusivePurchased(msg.sender, id, price);
     }
 
-    /// @dev v5: override the single `_update` hook to block any transfer.
+    /// @dev v5: override the single `_update` hook to block any transfer.  
+    /// Only mint (prevOwner==0) or burn (to==0) allowed. :contentReference[oaicite:5]{index=5}
     function _update(
         address to,
         uint256 tokenId,
         address auth
     ) internal virtual override returns (address) {
         address prev = super._update(to, tokenId, auth);
-        // Only allow mint (prev==0) or burn (to==0). No subsequent transfers.
-        if (prev != address(0) && to != address(0)) revert TransfersDisabled();
+        if (prev != address(0) && to != address(0)) {
+            revert TransfersDisabled();
+        }
         return prev;
     }
 
-    /// @notice Enumerate all exclusive IDs owned by `ownerAddr`.
+    /// @notice Returns all exclusive token IDs owned by `ownerAddr`.
     function tokensOfOwner(address ownerAddr) external view returns (uint256[] memory) {
         return _ownerTokens[ownerAddr];
     }
