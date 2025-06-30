@@ -8,6 +8,11 @@ const jwt = require("jsonwebtoken");
 const { ethers } = require("ethers");
 const rateLimit = require("express-rate-limit");
 
+// Add Pinata SDK, multer, and stream utilities for uploads
+const pinataSDK = require("@pinata/sdk");
+const multer    = require("multer");
+const { Readable } = require("stream");
+
 const app = express();
 const server = http.createServer(app);
 
@@ -85,9 +90,9 @@ const taskSchema = new mongoose.Schema({
   taskDescription: { type: String, required: true },
   taskTags:        { type: [String], default: [] },
   workerAddress:   { type: String, required: true },
-  kasAmount:       { type: String }, // Add this field
-  paymentType:     { type: String, enum: ["oneoff"], default: "oneoff" }, // Add this
-  duration:        { type: String }, // Add this (for future use)
+  kasAmount:       { type: String },
+  paymentType:     { type: String, enum: ["oneoff"], default: "oneoff" },
+  duration:        { type: String },
   status:          { type: String, enum: ["OPEN", "OFFERED", "CONVERTED"], default: "OPEN" },
   createdAt:       { type: Date, default: Date.now },
 });
@@ -96,9 +101,9 @@ const POWTask = mongoose.model("POWTask", taskSchema);
 const offerSchema = new mongoose.Schema({
   task:             { type: mongoose.Schema.Types.ObjectId, ref: "POWTask", required: true },
   employerAddress:  { type: String, required: true },
-  workerAddress:    { type: String, required: true }, // Add this field
+  workerAddress:    { type: String, required: true },
   status:           { type: String, enum: ["PENDING", "DECLINED", "ACCEPTED"], default: "PENDING" },
-  kasAmount:        { type: String }, // Add these fields for offer details
+  kasAmount:        { type: String },
   paymentType:      { type: String, enum: ["weekly", "oneoff"] },
   duration:         { type: String },
   createdAt:        { type: Date, default: Date.now },
@@ -125,6 +130,28 @@ const chatSchema = new mongoose.Schema({
   createdAt:    { type: Date, default: Date.now },
 });
 const POWChatMessage = mongoose.model("POWChatMessage", chatSchema);
+
+// ─── ASSET MODEL (for marketplace) ─────────────────────────────────────────────
+const assetSchema = new mongoose.Schema({
+  title:         { type: String, required: true },
+  description:   { type: String, required: true },
+  category:      { type: String, required: true },
+  tags:          { type: [String], default: [] },
+  price:         { type: String, required: true },
+  license:       { type: String, enum: ["standard", "exclusive"], required: true },
+  fileCid:       { type: String, required: true },
+  metadataCid:   { type: String, required: true },
+  metadataUri:   { type: String, required: true },
+  tokenId:       { type: String, default: null },
+  creatorAddress:{ type: String, required: true },
+  status:        { type: String, enum: ["pending", "active", "sold"], default: "pending" },
+  downloads:     { type: Number, default: 0 },
+  rating:        { type: Number, default: 0 },
+  reviewCount:   { type: Number, default: 0 },
+  createdAt:     { type: Date, default: Date.now },
+  updatedAt:     { type: Date, default: Date.now },
+});
+const Asset = mongoose.model("Asset", assetSchema);
 
 // ─── AUTH HELPERS ──────────────────────────────────────────────────────────────
 const challenges = new Map();
@@ -289,7 +316,7 @@ app.post("/api/tasks", requireAuth, async (req, res) => {
   if (activeCount >= 3)
     return res.status(400).json({ error: "Cannot have more than 3 active tasks" });
 
-  const { taskName, taskDescription, taskTags, kasAmount, paymentType, duration } = req.body; // Added missing fields
+  const { taskName, taskDescription, taskTags, kasAmount, paymentType, duration } = req.body;
 
   if (!taskName || !taskDescription)
     return res.status(400).json({ error: "Missing required fields" });
@@ -298,9 +325,9 @@ app.post("/api/tasks", requireAuth, async (req, res) => {
     taskName,
     taskDescription,
     taskTags: taskTags || [],
-    kasAmount, // Add this
-    paymentType, // Add this  
-    duration, // Add this
+    kasAmount,
+    paymentType,
+    duration,
     workerAddress: req.user.wallet
   });
 
@@ -336,13 +363,13 @@ app.post("/api/tasks/:taskId/offers", requireAuth, async (req, res) => {
   if (task.status !== "OPEN")
     return res.status(400).json({ error: "Task is not open for offers" });
 
-  const { kasAmount, paymentType, duration } = req.body; // Get offer details
+  const { kasAmount, paymentType, duration } = req.body;
 
   const offer = await POWOffer.create({
     task:            task._id,
     employerAddress: req.user.wallet,
-    workerAddress:   task.workerAddress, // Add worker address
-    kasAmount,       // Add offer details
+    workerAddress:   task.workerAddress,
+    kasAmount,
     paymentType,
     duration,
   });
@@ -382,7 +409,6 @@ app.post("/api/offers/:offerId/job", requireAuth, async (req, res) => {
   res.status(201).json(job);
 });
 
-// ─── FETCH OFFERS ─────────────────────────────────────────────────────────────
 app.get("/api/offers", requireAuth, async (req, res) => {
   const { employerAddress, workerAddress } = req.query;
   if (!employerAddress && !workerAddress) {
@@ -405,39 +431,32 @@ app.get("/api/offers", requireAuth, async (req, res) => {
   }
 });
 
-// Accept an offer (worker accepts employer's offer)
 app.post("/api/offers/:offerId/accept", requireAuth, async (req, res) => {
   try {
     const offer = await POWOffer.findById(req.params.offerId).populate("task");
-    
     if (!offer) return res.status(404).json({ error: "Offer not found" });
-    
     if (offer.workerAddress !== req.user.wallet)
       return res.status(403).json({ error: "Not authorized to accept this offer" });
-    
     if (offer.status !== "PENDING")
       return res.status(400).json({ error: "Offer cannot be accepted" });
-    
+
     const jobPaymentType = offer.paymentType === "oneoff"
       ? "ONE_OFF"
       : "WEEKLY";
-    
-    // Create job listing
+
     const job = await POWJob.create({
       paymentType: jobPaymentType,
       jobName: offer.task.taskName,
       jobDescription: offer.task.taskDescription,
       jobTags: offer.task.taskTags,
       employerAddress: offer.employerAddress,
-      employeeAddress: req.user.wallet, // Assign worker immediately
+      employeeAddress: req.user.wallet,
       status: "IN_PROGRESS"
     });
 
-    // Update offer status
     offer.status = "ACCEPTED";
     await offer.save();
 
-    // Update task status
     offer.task.status = "CONVERTED";
     await offer.task.save();
 
@@ -448,24 +467,18 @@ app.post("/api/offers/:offerId/accept", requireAuth, async (req, res) => {
   }
 });
 
-// Decline an offer (worker declines employer's offer)
 app.post("/api/offers/:offerId/decline", requireAuth, async (req, res) => {
   try {
     const offer = await POWOffer.findById(req.params.offerId).populate("task");
-    
     if (!offer) return res.status(404).json({ error: "Offer not found" });
-    
     if (offer.workerAddress !== req.user.wallet)
       return res.status(403).json({ error: "Not authorized to decline this offer" });
-    
     if (offer.status !== "PENDING")
       return res.status(400).json({ error: "Offer cannot be declined" });
 
-    // Update offer status
     offer.status = "DECLINED";
     await offer.save();
 
-    // Reset task status to OPEN
     offer.task.status = "OPEN";
     await offer.task.save();
 
@@ -476,25 +489,19 @@ app.post("/api/offers/:offerId/decline", requireAuth, async (req, res) => {
   }
 });
 
-// Cancel/delete an offer (employer cancels their offer)
 app.delete("/api/offers/:offerId", requireAuth, async (req, res) => {
   try {
     const offer = await POWOffer.findById(req.params.offerId).populate("task");
-    
     if (!offer) return res.status(404).json({ error: "Offer not found" });
-    
     if (offer.employerAddress !== req.user.wallet)
       return res.status(403).json({ error: "Not authorized to cancel this offer" });
 
-    // Reset task status to OPEN if it was OFFERED
     if (offer.task.status === "OFFERED") {
       offer.task.status = "OPEN";
       await offer.task.save();
     }
 
-    // Delete the offer
     await offer.deleteOne();
-
     res.json({ message: "Offer cancelled successfully" });
   } catch (e) {
     console.error("Cancel offer error:", e);
@@ -592,6 +599,83 @@ app.get("/api/chat/conversations", requireAuth, async (req, res) => {
   } catch (e) {
     console.error("Error fetching user conversations:", e);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── MARKETPLACE UPLOAD & METADATA API ────────────────────────────────────────
+
+// Configure Pinata
+const pinata = pinataSDK(process.env.PINATA_API_KEY, process.env.PINATA_SECRET);
+
+// Multer for multipart file upload, limit 100 MB
+const upload = multer({ limits: { fileSize: 100 * 1024 * 1024 } });
+
+
+function bufferToStream(buffer) {
+  const rs = new Readable();
+  rs._read = () => {};
+  rs.push(buffer);
+  rs.push(null);
+  return rs;
+}
+
+app.post("/api/upload", upload.single("file"), async (req, res) => {
+  try {
+    const { originalname, mimetype, size, buffer } = req.file;
+
+    const options = {
+      pinataMetadata: { name: originalname },
+      pinataOptions: { cidVersion: 1 }
+    };
+    const result = await pinata.pinFileToIPFS(bufferToStream(buffer), options);
+
+    const cid = result.IpfsHash;
+    const url = `https://gateway.pinata.cloud/ipfs/${cid}`;
+
+    res.json({ cid, url, size, mimeType: mimetype });
+  } catch (err) {
+    console.error("Upload error:", err);
+    res.status(500).json({ error: "File upload failed" });
+  }
+});
+
+
+app.post("/api/metadata", requireAuth, async (req, res) => {
+  try {
+    const { title, description, category, tags, price, license, fileCid } = req.body;
+    if (!title || !description || !category || !price || !license || !fileCid) {
+      return res.status(400).json({ error: "Missing required metadata fields" });
+    }
+
+    const metadata = {
+      name:        title,
+      description,
+      image:       `ipfs://${fileCid}`,
+      attributes: [
+        { trait_type: "Category", value: category },
+        { trait_type: "License",  value: license }
+      ]
+    };
+
+    const pinResult = await pinata.pinJSONToIPFS(metadata, {
+      pinataMetadata: { name: `${title}-metadata` }
+    });
+    const metadataCid = pinResult.IpfsHash;
+    const metadataUri = `ipfs://${metadataCid}`;
+
+    const assetDoc = await Asset.create({
+      title, description, category, tags: tags || [],
+      price, license, fileCid, metadataCid, metadataUri,
+      creatorAddress: req.user.wallet,
+      status: "pending",
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    res.status(201).json({ asset: assetDoc });
+  } catch (err) {
+    console.error("Metadata error:", err);
+    res.status(500).json({ error: "Metadata pinning failed" });
   }
 });
 
