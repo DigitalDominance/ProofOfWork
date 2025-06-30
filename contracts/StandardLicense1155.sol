@@ -2,12 +2,12 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";            // ERC-1155 core
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            // v5 guard
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            // Reentrancy guard (v5)
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @notice Soulbound ERC-1155 for multi-edition “standard” licenses.
 contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
-    uint256 private _nextAssetId;
+    uint256 private _nextAssetId; 
 
     mapping(uint256 => string)   private _uris;
     mapping(uint256 => uint256)  public  pricePerAsset;
@@ -20,8 +20,9 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
     error IncorrectPayment(uint256 required, uint256 provided);
 
     event AssetRegistered(uint256 indexed id, address indexed creator, string uri, uint256 price);
-    event AssetPurchased(address indexed buyer,  uint256 indexed id,     uint256 amount, uint256 price);
+    event AssetPurchased(address indexed buyer,  uint256 indexed id, uint256 amount, uint256 price);
 
+    /// @dev Deployer becomes owner.
     constructor() ERC1155("") Ownable(msg.sender) {}
 
     /// @notice Creator lists a new standard asset.
@@ -36,12 +37,12 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         emit AssetRegistered(id, msg.sender, metadataUri, price);
     }
 
-    /// @notice Returns metadata URI for `id`.
+    /// @notice Returns the metadata URI for `id`.
     function uri(uint256 id) public view override returns (string memory) {
         return _uris[id];
     }
 
-    /// @notice Buyers mint unlimited soulbound copies by calling this.
+    /// @notice Buyers mint unlimited soulbound copies by paying `price * amount`.
     function purchaseStandard(uint256 id, uint256 amount)
         external
         payable
@@ -65,22 +66,19 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         emit AssetPurchased(msg.sender, id, amount, price);
     }
 
-    /// @dev Blocks any transfer after mint; only mint (from==0) or burn (to==0) allowed.
-    function _beforeTokenTransfer(
-        address operator,
+    /// @dev v5: override the single `_update` hook (replaces pre/post transfer hooks) and block any transfer.
+    function _update(
         address from,
         address to,
         uint256[] memory ids,
-        uint256[] memory amounts,
-        bytes memory data
+        uint256[] memory amounts
     ) internal virtual override {
-        super._beforeTokenTransfer(operator, from, to, ids, amounts, data);
-        if (from != address(0) && to != address(0)) {
-            revert TransfersDisabled();
-        }
+        super._update(from, to, ids, amounts);
+        // Only allow mint (from==0) or burn (to==0)
+        if (from != address(0) && to != address(0)) revert TransfersDisabled();
     }
 
-    /// @notice Returns all asset IDs that `account` has ever purchased.
+    /// @notice Returns all asset IDs ever held by `account`.
     function tokensOfHolder(address account) external view returns (uint256[] memory) {
         return _holderTokens[account];
     }
