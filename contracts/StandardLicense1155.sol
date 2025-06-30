@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";            // ERC-1155 core
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            // v5 reentrancy guard
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @notice Soulbound ERC-1155 for multi-edition “standard” licenses.
@@ -22,7 +22,6 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
     event AssetRegistered(uint256 indexed id, address indexed creator, string uri, uint256 price);
     event AssetPurchased(address indexed buyer,  uint256 indexed id,     uint256 amount, uint256 price);
 
-    /// @dev Deployer becomes owner.
     constructor() ERC1155("") Ownable(msg.sender) {}
 
     /// @notice Creator lists a new standard asset.
@@ -66,7 +65,7 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         emit AssetPurchased(msg.sender, id, amount, price);
     }
 
-    /// @dev Blocks any transfer (only mint from==0 or burn to==0 allowed).
+    /// @dev Soulbound: blocks any transfer except mint (from==0) or burn (to==0).
     function _beforeTokenTransfer(
         address operator,
         address from,
@@ -74,14 +73,14 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         uint256[] memory ids,
         uint256[] memory amounts,
         bytes memory data
-    ) internal virtual override(ERC1155) {
+    ) internal virtual override {
         super._beforeTokenTransfer(operator, from, to, ids, amounts, data);
         if (from != address(0) && to != address(0)) {
             revert TransfersDisabled();
         }
     }
 
-    /// @notice Returns all asset IDs ever purchased by `account`.
+    /// @notice Returns all standard asset IDs ever purchased by `account`.
     function tokensOfHolder(address account) external view returns (uint256[] memory) {
         return _holderTokens[account];
     }
