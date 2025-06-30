@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// ERC-721 core + enumerable extension
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";                  
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";                     // ERC-721 core :contentReference[oaicite:6]{index=6}
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol"; // Enumerable extension :contentReference[oaicite:7]{index=7}
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";               
-import "@openzeppelin/contracts/utils/Counters.sol"; 
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";                  // v5 path :contentReference[oaicite:8]{index=8}
 
-/// @notice Soulbound ERC-721 for “exclusive” licenses (one sale only).
+/// @notice Soulbound ERC-721 for one-off “exclusive” licenses.
 contract ExclusiveLicense721 is ERC721, ERC721Enumerable, Ownable, ReentrancyGuard {
-    using Counters for Counters.Counter;
-    Counters.Counter private _assetIdCounter;
+    uint256 private _nextAssetId;  // manual counter
 
     mapping(uint256 => string)  private _tokenURIs;
     mapping(uint256 => uint256) public  pricePerAsset;
@@ -34,41 +31,29 @@ contract ExclusiveLicense721 is ERC721, ERC721Enumerable, Ownable, ReentrancyGua
         ERC721(name_, symbol_)
     {}
 
-    /// @notice Creator lists a new exclusive asset.
+    /// @notice Creators list a new exclusive asset.
     function registerExclusiveAsset(string calldata uri, uint256 price)
         external
         returns (uint256 id)
     {
-        id = _assetIdCounter.current();
-        _assetIdCounter.increment();
-
+        id = _nextAssetId++;
         _tokenURIs[id]    = uri;
         pricePerAsset[id] = price;
         creatorOf[id]     = msg.sender;
         isListed[id]      = true;
-
         emit AssetRegisteredExclusive(id, msg.sender, uri, price);
     }
 
     /// @inheritdoc ERC721
-    function tokenURI(uint256 tokenId)
-        public
-        view
-        override
-        returns (string memory)
-    {
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
         return _tokenURIs[tokenId];
     }
 
-    /// @notice One-time purchase → soulbound mint.
-    function purchaseExclusive(uint256 id)
-        external
-        payable
-        nonReentrant
-    {
-        if (!isListed[id])       revert NotListed(id);
+    /// @notice One-time soulbound mint for exclusive purchase.
+    function purchaseExclusive(uint256 id) external payable nonReentrant {
+        if (!isListed[id])      revert NotListed(id);
         uint256 price = pricePerAsset[id];
-        if (msg.value != price)  revert IncorrectPayment(price, msg.value);
+        if (msg.value != price) revert IncorrectPayment(price, msg.value);
 
         isListed[id] = false;
         _safeMint(msg.sender, id);
@@ -79,7 +64,7 @@ contract ExclusiveLicense721 is ERC721, ERC721Enumerable, Ownable, ReentrancyGua
         emit ExclusivePurchased(msg.sender, id, price);
     }
 
-    /// @dev Blocks any transfer except mint (from=0) or burn (to=0).
+    /// @dev Blocks any transfers (only mints and burns).
     function _beforeTokenTransfer(
         address from, address to, uint256 tokenId, uint256 batchSize
     ) internal override(ERC721, ERC721Enumerable) {
@@ -98,11 +83,7 @@ contract ExclusiveLicense721 is ERC721, ERC721Enumerable, Ownable, ReentrancyGua
     }
 
     /// @notice List of token IDs owned by `ownerAddr`.
-    function tokensOfOwner(address ownerAddr)
-        external
-        view
-        returns (uint256[] memory)
-    {
+    function tokensOfOwner(address ownerAddr) external view returns (uint256[] memory) {
         uint256 count = balanceOf(ownerAddr);
         uint256[] memory result = new uint256[](count);
         for (uint256 i = 0; i < count; i++) {
