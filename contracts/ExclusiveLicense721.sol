@@ -2,11 +2,10 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";               // ERC-721 core
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            // v5 guard
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            // Reentrancy guard (v5)
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-/// @notice ERC-721 for single-edition “exclusive” licenses.
-/// @dev Transfers and approvals are not overridden here (non-virtual in OZ v5).
+/// @notice Soulbound ERC-721 for one-off “exclusive” licenses.
 contract ExclusiveLicense721 is ERC721, Ownable, ReentrancyGuard {
     uint256 private _nextAssetId;
 
@@ -16,12 +15,14 @@ contract ExclusiveLicense721 is ERC721, Ownable, ReentrancyGuard {
     mapping(uint256 => bool)     public  isListed;
     mapping(address => uint256[]) private _ownerTokens;
 
+    error TransfersDisabled();
     error NotListed(uint256 id);
     error IncorrectPayment(uint256 required, uint256 provided);
 
     event AssetRegisteredExclusive(uint256 indexed id, address indexed creator, string uri, uint256 price);
     event ExclusivePurchased(address indexed buyer, uint256 indexed id, uint256 price);
 
+    /// @dev Deployer becomes owner.
     constructor(string memory name_, string memory symbol_)
         ERC721(name_, symbol_)
         Ownable(msg.sender)
@@ -33,7 +34,7 @@ contract ExclusiveLicense721 is ERC721, Ownable, ReentrancyGuard {
         returns (uint256 id)
     {
         id = _nextAssetId++;
-        _tokenUris[id]    = uri;
+        _tokenUris[id]     = uri;
         pricePerAsset[id] = price;
         creatorOf[id]     = msg.sender;
         isListed[id]      = true;
@@ -45,11 +46,11 @@ contract ExclusiveLicense721 is ERC721, Ownable, ReentrancyGuard {
         return _tokenUris[id];
     }
 
-    /// @notice Buyers mint their one and only exclusive NFT here.
+    /// @notice Buyers mint their single soulbound NFT by paying `price`.
     function purchaseExclusive(uint256 id) external payable nonReentrant {
-        require(isListed[id], "Not listed");
+        if (!isListed[id])      revert NotListed(id);
         uint256 price = pricePerAsset[id];
-        require(msg.value == price, "Incorrect payment");
+        if (msg.value != price) revert IncorrectPayment(price, msg.value);
 
         isListed[id] = false;
         _safeMint(msg.sender, id);
@@ -61,7 +62,19 @@ contract ExclusiveLicense721 is ERC721, Ownable, ReentrancyGuard {
         emit ExclusivePurchased(msg.sender, id, price);
     }
 
-    /// @notice List of exclusive token IDs owned by `ownerAddr`.
+    /// @dev v5: override the single `_update` hook to block any transfer.
+    function _update(
+        address to,
+        uint256 tokenId,
+        address auth
+    ) internal virtual override returns (address) {
+        address prev = super._update(to, tokenId, auth);
+        // Only allow mint (prev==0) or burn (to==0). No subsequent transfers.
+        if (prev != address(0) && to != address(0)) revert TransfersDisabled();
+        return prev;
+    }
+
+    /// @notice Enumerate all exclusive IDs owned by `ownerAddr`.
     function tokensOfOwner(address ownerAddr) external view returns (uint256[] memory) {
         return _ownerTokens[ownerAddr];
     }
