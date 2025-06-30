@@ -1,19 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// ERC-1155 core
-import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";         
-// Reentrancy guard (now under utils in v5)
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            
-// Counters library
-import "@openzeppelin/contracts/utils/Counters.sol";                   
-// Ownable
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";             // ERC-1155 core :contentReference[oaicite:4]{index=4}
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";             // v5 path :contentReference[oaicite:5]{index=5}
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-/// @notice Soulbound ERC-1155 for “standard” licenses (unlimited mints).
+/// @notice Soulbound ERC-1155 for multi-edition “standard” licenses.
 contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
-    using Counters for Counters.Counter;
-    Counters.Counter private _assetIdCounter;
+    uint256 private _nextAssetId;  // manual counter instead of Counters.sol
 
     mapping(uint256 => string)   private _uris;
     mapping(uint256 => uint256)  public  pricePerAsset;
@@ -26,22 +20,19 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
     error IncorrectPayment(uint256 required, uint256 provided);
 
     event AssetRegistered(uint256 indexed id, address indexed creator, string uri, uint256 price);
-    event AssetPurchased(uint256 indexed buyer,  uint256 indexed id,     uint256 amount, uint256 price);
+    event AssetPurchased(address indexed buyer,  uint256 indexed id,     uint256 amount, uint256 price);
 
     constructor() ERC1155("") {}
 
-    /// @notice Creator lists a new standard asset.
+    /// @notice Creators list a new standard asset.
     function registerStandardAsset(string calldata uri, uint256 price)
         external
         returns (uint256 id)
     {
-        id = _assetIdCounter.current();
-        _assetIdCounter.increment();
-
-        _uris[id]         = uri;
+        id = _nextAssetId++;
+        _uris[id] = uri;
         pricePerAsset[id] = price;
-        creatorOf[id]     = msg.sender;
-
+        creatorOf[id] = msg.sender;
         emit AssetRegistered(id, msg.sender, uri, price);
     }
 
@@ -50,7 +41,7 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         return _uris[id];
     }
 
-    /// @notice Unlimited-supply purchase → soulbound mint.
+    /// @notice Buyers mint unlimited copies under soulbound rules.
     function purchaseStandard(uint256 id, uint256 amount)
         external
         payable
@@ -68,14 +59,14 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
 
         _mint(msg.sender, id, amount, "");
 
-        // forward funds
+        // Forward payment
         (bool sent,) = payable(creatorOf[id]).call{value: msg.value}("");
         require(sent, "Payout failed");
 
         emit AssetPurchased(msg.sender, id, amount, price);
     }
 
-    /// @dev Blocks any transfer except mint (from=0) or burn (to=0).
+    /// @dev Blocks any transfers (only mints and burns allowed).
     function _beforeTokenTransfer(
         address, address from, address to,
         uint256[] memory, uint256[] memory, bytes memory
@@ -85,11 +76,7 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /// @notice List of asset IDs owned by `account`.
-    function tokensOfHolder(address account)
-        external
-        view
-        returns (uint256[] memory)
-    {
+    function tokensOfHolder(address account) external view returns (uint256[] memory) {
         return _holderTokens[account];
     }
 }
