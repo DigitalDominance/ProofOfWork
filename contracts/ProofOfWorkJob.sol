@@ -31,6 +31,10 @@ contract ProofOfWorkJob is ReentrancyGuard {
     mapping(address => bool) public hasCompletedJob;
     mapping(address => bool) public hasRatedEmployer;
     mapping(address => bool) public employerHasRatedWorker;
+
+    mapping(address => bool) public hasRequestedPayment;
+    mapping(address => uint256) public paymentRequestTime;
+    mapping(address => bool) public hasReceivedAllPayments;
     
     bool public jobEnded = false;
     bool public jobCancelled = false;
@@ -71,6 +75,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
     event RatingSubmitted(address indexed rater, address indexed ratee, uint8 score);
     event JobEnded();
     event JobCancelled(uint256 refundAmount);
+    event PaymentRequested(address indexed worker, uint256 requestTime);
+    event PaymentConfirmed(address indexed worker, uint256 amount);
 
     modifier onlyEmployer() {
         require(msg.sender == employer, "Only employer");
@@ -120,12 +126,85 @@ contract ProofOfWorkJob is ReentrancyGuard {
         disputeDAO = DisputeDAO(_disputeDAO);
     }
 
-    // ==================== JOB CANCELLATION ====================
+    function requestWeeklyPayment() external jobNotCancelled {
+        require(payType == PayType.WEEKLY, "Not weekly");
+        require(isWorker[msg.sender], "Not assigned");
+        require(activeWorker[msg.sender], "Inactive");
+        require(block.timestamp >= lastPayoutAt + 1 weeks, "Too soon");
+        require(payoutsMade < durationWeeks, "All paid");
+        require(!hasRequestedPayment[msg.sender], "Already requested");
 
-    /**
-     * @dev Cancel the job and refund remaining funds to employer
-     * Can only be called if no workers have been assigned
-     */
+        hasRequestedPayment[msg.sender] = true;
+        paymentRequestTime[msg.sender] = block.timestamp;
+
+        emit PaymentRequested(msg.sender, block.timestamp);
+    }
+
+    function confirmWeeklyPayment(address worker) external onlyEmployer nonReentrant jobNotCancelled {
+        require(payType == PayType.WEEKLY, "Not weekly");
+        require(isWorker[worker], "Not assigned");
+        require(activeWorker[worker], "Inactive");
+        require(hasRequestedPayment[worker], "No payment request");
+        require(block.timestamp >= lastPayoutAt + 1 weeks, "Too soon");
+        require(payoutsMade < durationWeeks, "All paid");
+
+        lastPayoutAt = block.timestamp;
+        payoutsMade++;
+        hasRequestedPayment[worker] = false;
+
+        uint256 amount = weeklyPay;
+        address payable w = payable(worker);
+
+        (bool s,) = w.call{value: amount}("");
+        require(s, "Pay failed");
+
+        reputation.updateWorker(w, 1);
+        
+        // Mark as completed if this is the final payout
+        if (payoutsMade == durationWeeks) {
+            hasCompletedJob[w] = true;
+            hasReceivedAllPayments[w] = true;
+        }
+        
+        emit PaymentConfirmed(w, amount);
+        emit PaymentReleased(w, amount);
+    }    
+
+    function requestOneOffPayment() external jobNotCancelled {
+        require(payType == PayType.ONE_OFF, "Not one-off");
+        require(isWorker[msg.sender], "Not assigned");
+        require(activeWorker[msg.sender], "Inactive");
+        require(!hasRequestedPayment[msg.sender], "Already requested");
+
+        hasRequestedPayment[msg.sender] = true;
+        paymentRequestTime[msg.sender] = block.timestamp;
+
+        emit PaymentRequested(msg.sender, block.timestamp);
+    }
+
+    function confirmOneOffPayment(address worker) external onlyEmployer nonReentrant jobNotCancelled {
+        require(payType == PayType.ONE_OFF, "Not one-off");
+        require(isWorker[worker], "Not assigned");
+        require(activeWorker[worker], "Inactive");
+        require(hasRequestedPayment[worker], "No payment request");
+
+        hasRequestedPayment[worker] = false;
+
+        uint256 amount = totalPay;
+        address payable w = payable(worker);
+
+        (bool s,) = w.call{value: amount}("");
+        require(s, "Pay failed");
+
+        reputation.updateWorker(w, 1);
+        hasCompletedJob[w] = true;
+        hasReceivedAllPayments[w] = true;
+        
+        emit PaymentConfirmed(w, amount);
+        emit OneOffPayment(w, amount);
+        emit JobCompleted(w);
+    }    
+
     function cancelJob() external onlyEmployer nonReentrant {
         require(!jobCancelled, "Job already cancelled");
         require(assignedWorkers.length == 0, "Cannot cancel job with assigned workers");
@@ -142,28 +221,18 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit JobCancelled(refundAmount);
     }
 
-    /**
-     * @dev Check if job can be cancelled
-     */
     function canCancelJob() external view returns (bool) {
         return !jobCancelled && 
                assignedWorkers.length == 0 && 
                payoutsMade == 0;
     }
 
-    // ==================== RATING FUNCTIONS ====================
-
-    /**
-     * @dev Rate a worker (only employer can rate workers)
-     * @param worker The worker's address
-     * @param score Rating score (1-5)
-     */
     function rateWorker(
-        address worker,
-        uint8 score
+    address worker,
+    uint8 score
     ) external onlyEmployer jobNotCancelled {
         require(isWorker[worker], "Not a worker");
-        require(hasCompletedJob[worker] || jobEnded, "Worker hasn't completed job");
+        require(hasReceivedAllPayments[worker] || jobEnded, "Worker hasn't received all payments");
         require(!employerHasRatedWorker[worker], "Already rated this worker");
         require(score >= 1 && score <= 5, "Score must be 1-5");
 
@@ -173,15 +242,11 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit RatingSubmitted(msg.sender, worker, score);
     }
 
-    /**
-     * @dev Rate the employer (only workers can rate employer)
-     * @param score Rating score (1-5)
-     */
     function rateEmployer(
         uint8 score
     ) external jobNotCancelled {
         require(isWorker[msg.sender], "Not a worker");
-        require(hasCompletedJob[msg.sender] || jobEnded, "Haven't completed job");
+        require(employerHasRatedWorker[msg.sender] || jobEnded, "Employer hasn't rated you yet");
         require(!hasRatedEmployer[msg.sender], "Already rated employer");
         require(score >= 1 && score <= 5, "Score must be 1-5");
 
@@ -191,32 +256,23 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit RatingSubmitted(msg.sender, employer, score);
     }
 
-    /**
-     * @dev End the job (allows all parties to rate even if job not fully completed)
-     */
     function endJob() external onlyEmployer jobNotCancelled {
         jobEnded = true;
         emit JobEnded();
     }
 
-    /**
-     * @dev Check if employer can rate a worker
-     */
     function canRateWorker(address worker) external view returns (bool) {
         return !jobCancelled &&
-               isWorker[worker] && 
-               (hasCompletedJob[worker] || jobEnded) && 
-               !employerHasRatedWorker[worker];
+            isWorker[worker] && 
+            (hasReceivedAllPayments[worker] || jobEnded) && 
+            !employerHasRatedWorker[worker];
     }
 
-    /**
-     * @dev Check if worker can rate employer
-     */
     function canRateEmployer(address worker) external view returns (bool) {
         return !jobCancelled &&
-               isWorker[worker] && 
-               (hasCompletedJob[worker] || jobEnded) && 
-               !hasRatedEmployer[worker];
+            isWorker[worker] && 
+            (employerHasRatedWorker[worker] || jobEnded) && 
+            !hasRatedEmployer[worker];
     }
 
     // ==================== APPLICANT FUNCTIONS ====================
@@ -255,10 +311,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
 
     // ==================== APPLICATION REVIEW FUNCTIONS ====================
 
-    /**
-     * @dev Accept an application (only employer)
-     * @param applicant The applicant's address
-     */
     function acceptApplication(address applicant) external onlyEmployer jobNotCancelled {
         require(hasApplied[applicant], "No application found");
         require(applicants[applicant].isActive, "Application not active");
@@ -280,10 +332,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit WorkerAssigned(applicant);
     }
 
-    /**
-     * @dev Decline/Reject an application (only employer)
-     * @param applicant The applicant's address
-     */
     function declineApplication(address applicant) external onlyEmployer jobNotCancelled {
         require(hasApplied[applicant], "No application found");
         require(applicants[applicant].isActive, "Application not active");
@@ -298,10 +346,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         emit ApplicationDeclined(applicant);
     }
 
-    /**
-     * @dev Decline multiple applications at once (only employer)
-     * @param applicantList Array of applicant addresses to decline
-     */
     function batchDeclineApplications(address[] memory applicantList) external onlyEmployer jobNotCancelled {
         for (uint256 i = 0; i < applicantList.length; i++) {
             address applicant = applicantList[i];
@@ -316,10 +360,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         }
     }
 
-    /**
-     * @dev Batch accept multiple applications
-     * @param applicantList Array of applicant addresses to accept
-     */
     function batchAcceptApplications(address[] memory applicantList) external onlyEmployer jobNotCancelled {
         for (uint256 i = 0; i < applicantList.length; i++) {
             address applicant = applicantList[i];
@@ -345,10 +385,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         }
     }
 
-    /**
-     * @dev Get applications by status
-     * @param status The status to filter by
-     */
     function getApplicationsByStatus(ApplicationStatus status) external view returns (address[] memory) {
         uint256 count = 0;
         
@@ -374,9 +410,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         return result;
     }
 
-    /**
-     * @dev Get reviewed applications that were accepted
-     */
     function getAcceptedApplications() external view returns (address[] memory) {
         uint256 count = 0;
         
@@ -404,9 +437,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         return result;
     }
 
-    /**
-     * @dev Get reviewed applications that were declined
-     */
     function getDeclinedApplications() external view returns (address[] memory) {
         uint256 count = 0;
         
@@ -434,9 +464,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         return result;
     }
 
-    /**
-     * @dev Get pending applications count
-     */
     function getPendingApplicationsCount() external view returns (uint256) {
         uint256 count = 0;
         for (uint256 i = 0; i < applicantAddresses.length; i++) {
@@ -448,9 +475,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         return count;
     }
 
-    /**
-     * @dev Get reviewed applications count
-     */
     function getReviewedApplicationsCount() external view returns (uint256) {
         uint256 count = 0;
         for (uint256 i = 0; i < applicantAddresses.length; i++) {
@@ -461,9 +485,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         return count;
     }
 
-    /**
-     * @dev Get accepted applications count
-     */
     function getAcceptedApplicationsCount() external view returns (uint256) {
         uint256 count = 0;
         for (uint256 i = 0; i < applicantAddresses.length; i++) {
@@ -475,9 +496,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         return count;
     }
 
-    /**
-     * @dev Get declined applications count
-     */
     function getDeclinedApplicationsCount() external view returns (uint256) {
         uint256 count = 0;
         for (uint256 i = 0; i < applicantAddresses.length; i++) {
@@ -539,9 +557,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
         );
     }
 
-    /**
-     * @dev Get application status as string for frontend display
-     */
     function getApplicationStatusString(address _applicant) external view returns (string memory) {
         require(hasApplied[_applicant], "No application found");
         
@@ -571,10 +586,6 @@ contract ProofOfWorkJob is ReentrancyGuard {
 
     // ==================== WORKER ASSIGNMENT FUNCTIONS ====================
 
-    /**
-     * @dev Direct worker assignment without application (only employer)
-     * @param worker The worker's address to assign directly
-     */
     function assignWorkerDirect(address worker) external onlyEmployer jobNotCancelled {
         require(worker != address(0), "Bad worker");
         require(!isWorker[worker], "Already assigned");
@@ -609,47 +620,28 @@ contract ProofOfWorkJob is ReentrancyGuard {
         activeWorker[msg.sender] = active;
     }
 
-    function releaseWeekly() external nonReentrant jobNotCancelled {
-        require(payType == PayType.WEEKLY, "Not weekly");
-        require(block.timestamp >= lastPayoutAt + 1 weeks, "Too soon");
-        require(payoutsMade < durationWeeks, "All paid");
-
-        lastPayoutAt = block.timestamp;
-        payoutsMade++;
-
-        uint256 amount = weeklyPay;
-        address payable w = payable(msg.sender);
-        require(activeWorker[w], "Inactive");
-
-        (bool s,) = w.call{value: amount}("");
-        require(s, "Pay failed");
-
-        reputation.updateWorker(w, 1);
-        
-        // Mark as completed if this is the final payout
-        if (payoutsMade == durationWeeks) {
-            hasCompletedJob[w] = true;
-        }
-        
-        emit PaymentReleased(w, amount);
+    function getPaymentRequestStatus(address worker) external view returns (bool hasRequested, uint256 requestTime) {
+        return (hasRequestedPayment[worker], paymentRequestTime[worker]);
     }
 
-    function releaseOneOff() external nonReentrant jobNotCancelled {
-        require(payType == PayType.ONE_OFF, "Not one-off");
-        require(isWorker[msg.sender], "Not assigned");
-        require(activeWorker[msg.sender], "Inactive");
-
-        uint256 amount = totalPay;
-        address payable w = payable(msg.sender);
-
-        (bool s,) = w.call{value: amount}("");
-        require(s, "Pay failed");
-
-        reputation.updateWorker(w, 1);
-        hasCompletedJob[w] = true;
+    function getPendingPaymentRequests() external view returns (address[] memory) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < assignedWorkers.length; i++) {
+            if (hasRequestedPayment[assignedWorkers[i]]) {
+                count++;
+            }
+        }
         
-        emit OneOffPayment(w, amount);
-        emit JobCompleted(w);
+        address[] memory pending = new address[](count);
+        uint256 index = 0;
+        for (uint256 i = 0; i < assignedWorkers.length; i++) {
+            if (hasRequestedPayment[assignedWorkers[i]]) {
+                pending[index] = assignedWorkers[i];
+                index++;
+            }
+        }
+        
+        return pending;
     }
 
     function openDispute(string calldata reason) external jobNotCancelled {
