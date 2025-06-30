@@ -9,8 +9,8 @@ const { ethers } = require("ethers");
 const rateLimit = require("express-rate-limit");
 
 // Add Pinata SDK, multer, and stream utilities for uploads
-const pinataSDK = require("@pinata/sdk");
-const multer    = require("multer");
+const { PinataSDK } = require("pinata");
+const multer      = require("multer");
 const { Readable } = require("stream");
 
 const app = express();
@@ -605,11 +605,14 @@ app.get("/api/chat/conversations", requireAuth, async (req, res) => {
 // ─── MARKETPLACE UPLOAD & METADATA API ────────────────────────────────────────
 
 // Configure Pinata
-const pinata = pinataSDK(process.env.PINATA_API_KEY, process.env.PINATA_SECRET);
+const pinata = new PinataSDK({
+  pinataApiKey:       process.env.PINATA_API_KEY,
+  pinataSecretApiKey: process.env.PINATA_SECRET_API_KEY,
+  // pinataJwt:        process.env.PINATA_JWT,  // uncomment if using JWT
+});
 
 // Multer for multipart file upload, limit 100 MB
 const upload = multer({ limits: { fileSize: 100 * 1024 * 1024 } });
-
 
 function bufferToStream(buffer) {
   const rs = new Readable();
@@ -622,16 +625,13 @@ function bufferToStream(buffer) {
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const { originalname, mimetype, size, buffer } = req.file;
-
     const options = {
       pinataMetadata: { name: originalname },
-      pinataOptions: { cidVersion: 1 }
+      pinataOptions:  { cidVersion: 1 }
     };
     const result = await pinata.pinFileToIPFS(bufferToStream(buffer), options);
-
     const cid = result.IpfsHash;
     const url = `https://gateway.pinata.cloud/ipfs/${cid}`;
-
     res.json({ cid, url, size, mimeType: mimetype });
   } catch (err) {
     console.error("Upload error:", err);
@@ -639,14 +639,12 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-
 app.post("/api/metadata", requireAuth, async (req, res) => {
   try {
     const { title, description, category, tags, price, license, fileCid } = req.body;
     if (!title || !description || !category || !price || !license || !fileCid) {
       return res.status(400).json({ error: "Missing required metadata fields" });
     }
-
     const metadata = {
       name:        title,
       description,
@@ -656,13 +654,11 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
         { trait_type: "License",  value: license }
       ]
     };
-
     const pinResult = await pinata.pinJSONToIPFS(metadata, {
       pinataMetadata: { name: `${title}-metadata` }
     });
     const metadataCid = pinResult.IpfsHash;
     const metadataUri = `ipfs://${metadataCid}`;
-
     const assetDoc = await Asset.create({
       title, description, category, tags: tags || [],
       price, license, fileCid, metadataCid, metadataUri,
@@ -671,7 +667,6 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
       createdAt: new Date(),
       updatedAt: new Date()
     });
-
     res.status(201).json({ asset: assetDoc });
   } catch (err) {
     console.error("Metadata error:", err);
@@ -717,4 +712,4 @@ io.on("connection", (socket) => {
 app.get("/", (req, res) => res.send("🔥 ProofOfWork API is live!"));
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🌐 Listening on port ${PORT}`));
+server.listen(PORT, () => console.log(`🌐 Listening on port ${
