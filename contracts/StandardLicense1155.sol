@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";            // ERC-1155 core
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            // Reentrancy guard (v5)
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";            // ERC-1155 core :contentReference[oaicite:0]{index=0}
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";            // v5 guard :contentReference[oaicite:1]{index=1}
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @notice Soulbound ERC-1155 for multi-edition “standard” licenses.
 contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
-    uint256 private _nextAssetId; 
+    uint256 private _nextAssetId;
 
     mapping(uint256 => string)   private _uris;
     mapping(uint256 => uint256)  public  pricePerAsset;
@@ -22,7 +22,6 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
     event AssetRegistered(uint256 indexed id, address indexed creator, string uri, uint256 price);
     event AssetPurchased(address indexed buyer,  uint256 indexed id, uint256 amount, uint256 price);
 
-    /// @dev Deployer becomes owner.
     constructor() ERC1155("") Ownable(msg.sender) {}
 
     /// @notice Creator lists a new standard asset.
@@ -37,7 +36,7 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         emit AssetRegistered(id, msg.sender, metadataUri, price);
     }
 
-    /// @notice Returns the metadata URI for `id`.
+    /// @notice Returns metadata URI for `id`.
     function uri(uint256 id) public view override returns (string memory) {
         return _uris[id];
     }
@@ -49,9 +48,9 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         nonReentrant
     {
         uint256 price = pricePerAsset[id];
-        if (price == 0)           revert NotListed(id);
+        if (price == 0)         revert NotListed(id);
         uint256 total = price * amount;
-        if (msg.value != total)   revert IncorrectPayment(total, msg.value);
+        if (msg.value != total) revert IncorrectPayment(total, msg.value);
 
         if (!_holderTokenExists[msg.sender][id]) {
             _holderTokens[msg.sender].push(id);
@@ -66,19 +65,21 @@ contract StandardLicense1155 is ERC1155, Ownable, ReentrancyGuard {
         emit AssetPurchased(msg.sender, id, amount, price);
     }
 
-    /// @dev v5: override the single `_update` hook (replaces pre/post transfer hooks) and block any transfer.
+    /// @dev v5: override the single `_update` hook to block any transfer.  
+    /// Only mint (from==0) or burn (to==0) allowed. :contentReference[oaicite:2]{index=2}
     function _update(
         address from,
         address to,
         uint256[] memory ids,
-        uint256[] memory amounts
+        uint256[] memory values
     ) internal virtual override {
-        super._update(from, to, ids, amounts);
-        // Only allow mint (from==0) or burn (to==0)
-        if (from != address(0) && to != address(0)) revert TransfersDisabled();
+        super._update(from, to, ids, values);
+        if (from != address(0) && to != address(0)) {
+            revert TransfersDisabled();
+        }
     }
 
-    /// @notice Returns all asset IDs ever held by `account`.
+    /// @notice Returns all asset IDs ever purchased by `account`.
     function tokensOfHolder(address account) external view returns (uint256[] memory) {
         return _holderTokens[account];
     }
