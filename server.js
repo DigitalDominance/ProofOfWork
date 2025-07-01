@@ -602,10 +602,14 @@ app.get("/api/chat/conversations", requireAuth, async (req, res) => {
   }
 });
 
+
+// ─── MARKETPLACE UPLOAD & METADATA API ────────────────────────────────────────
+
 // Configure Pinata SDK
+const { PinataSDK } = require("pinata");
 const pinata = new PinataSDK({
   pinataJwt:     process.env.PINATA_JWT,
-  pinataGateway: process.env.PINATA_GATEWAY,  // e.g. "fun-llama-300.mypinata.cloud"
+  pinataGateway: process.env.PINATA_GATEWAY,
 });
 
 // Multer for multipart file upload, limit 100 MB
@@ -619,7 +623,7 @@ function bufferToStream(buffer) {
   return rs;
 }
 
-// File upload endpoint
+// File upload endpoint (Option B)
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const { originalname, mimetype, size, buffer } = req.file;
@@ -627,9 +631,15 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       pinataMetadata: { name: originalname },
       pinataOptions:  { cidVersion: 1 }
     };
-    const result = await pinata.pinFileToIPFS(bufferToStream(buffer), options);
-    const cid = result.IpfsHash;
-    const url = `https://gateway.pinata.cloud/ipfs/${cid}`;
+
+    // Use the new Quickstart SDK upload namespace
+    const uploadResult = await pinata.upload.public.file(
+      bufferToStream(buffer),
+      options
+    );
+    const cid = uploadResult.cid;
+    const url = `https://${process.env.PINATA_GATEWAY}/ipfs/${cid}`;
+
     res.json({ cid, url, size, mimeType: mimetype });
   } catch (err) {
     console.error("Upload error:", err);
@@ -637,7 +647,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-// Metadata pinning endpoint
+// Metadata pinning endpoint (Option B)
 app.post("/api/metadata", requireAuth, async (req, res) => {
   try {
     const { title, description, category, tags, price, license, fileCid } = req.body;
@@ -655,11 +665,12 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
       ]
     };
 
-    const pinResult = await pinata.pinJSONToIPFS(metadata, {
-      pinataMetadata: { name: `${title}-metadata` }
-    });
-
-    const metadataCid = pinResult.IpfsHash;
+    // Use the new Quickstart SDK JSON upload
+    const jsonResult = await pinata.upload.public.json(
+      metadata,
+      { pinataMetadata: { name: `${title}-metadata` } }
+    );
+    const metadataCid = jsonResult.cid;
     const metadataUri = `ipfs://${metadataCid}`;
 
     const assetDoc = await Asset.create({
@@ -684,6 +695,8 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Metadata pinning failed" });
   }
 });
+
+
 
 // ─── SOCKET.IO ────────────────────────────────────────────────────────────────
 io.on("connection", (socket) => {
