@@ -12,6 +12,7 @@ const rateLimit = require("express-rate-limit");
 const { PinataSDK } = require("pinata");
 const multer      = require("multer");
 const { Readable } = require("stream");
+const { Blob }      = require("buffer");
 
 const app = express();
 const server = http.createServer(app);
@@ -603,10 +604,7 @@ app.get("/api/chat/conversations", requireAuth, async (req, res) => {
 });
 
 
-// ─── MARKETPLACE UPLOAD & METADATA API ────────────────────────────────────────
-
 // Configure Pinata SDK
-
 const pinata = new PinataSDK({
   pinataJwt:     process.env.PINATA_JWT,
   pinataGateway: process.env.PINATA_GATEWAY,
@@ -615,15 +613,7 @@ const pinata = new PinataSDK({
 // Multer for multipart file upload, limit 100 MB
 const upload = multer({ limits: { fileSize: 100 * 1024 * 1024 } });
 
-function bufferToStream(buffer) {
-  const rs = new Readable();
-  rs._read = () => {};
-  rs.push(buffer);
-  rs.push(null);
-  return rs;
-}
-
-// File upload endpoint (Option B)
+// File upload endpoint (Option B + Blob)
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const { originalname, mimetype, size, buffer } = req.file;
@@ -632,9 +622,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       pinataOptions:  { cidVersion: 1 }
     };
 
-    // Use the new Quickstart SDK upload namespace
+    // Convert Node Buffer → Blob so pinata.upload.public.file can append it
+    const blob = new Blob([buffer], { type: mimetype });
+
     const uploadResult = await pinata.upload.public.file(
-      bufferToStream(buffer),
+      blob,
       options
     );
     const cid = uploadResult.cid;
@@ -647,7 +639,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-// Metadata pinning endpoint (Option B)
+// Metadata pinning endpoint (unchanged)
 app.post("/api/metadata", requireAuth, async (req, res) => {
   try {
     const { title, description, category, tags, price, license, fileCid } = req.body;
@@ -665,7 +657,6 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
       ]
     };
 
-    // Use the new Quickstart SDK JSON upload
     const jsonResult = await pinata.upload.public.json(
       metadata,
       { pinataMetadata: { name: `${title}-metadata` } }
@@ -695,8 +686,6 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Metadata pinning failed" });
   }
 });
-
-
 
 // ─── SOCKET.IO ────────────────────────────────────────────────────────────────
 io.on("connection", (socket) => {
