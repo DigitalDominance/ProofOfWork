@@ -602,13 +602,10 @@ app.get("/api/chat/conversations", requireAuth, async (req, res) => {
   }
 });
 
-// ─── MARKETPLACE UPLOAD & METADATA API ────────────────────────────────────────
-
-// Configure Pinata
+// Configure Pinata SDK
 const pinata = new PinataSDK({
-  pinataApiKey:       process.env.PINATA_API_KEY,
-  pinataSecretApiKey: process.env.PINATA_SECRET_API_KEY,
-  // pinataJwt:        process.env.PINATA_JWT,  // uncomment if using JWT
+  pinataJwt:     process.env.PINATA_JWT,
+  pinataGateway: process.env.PINATA_GATEWAY,  // e.g. "fun-llama-300.mypinata.cloud"
 });
 
 // Multer for multipart file upload, limit 100 MB
@@ -622,6 +619,7 @@ function bufferToStream(buffer) {
   return rs;
 }
 
+// File upload endpoint
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const { originalname, mimetype, size, buffer } = req.file;
@@ -639,12 +637,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 });
 
+// Metadata pinning endpoint
 app.post("/api/metadata", requireAuth, async (req, res) => {
   try {
     const { title, description, category, tags, price, license, fileCid } = req.body;
     if (!title || !description || !category || !price || !license || !fileCid) {
       return res.status(400).json({ error: "Missing required metadata fields" });
     }
+
     const metadata = {
       name:        title,
       description,
@@ -654,19 +654,30 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
         { trait_type: "License",  value: license }
       ]
     };
+
     const pinResult = await pinata.pinJSONToIPFS(metadata, {
       pinataMetadata: { name: `${title}-metadata` }
     });
+
     const metadataCid = pinResult.IpfsHash;
     const metadataUri = `ipfs://${metadataCid}`;
+
     const assetDoc = await Asset.create({
-      title, description, category, tags: tags || [],
-      price, license, fileCid, metadataCid, metadataUri,
+      title,
+      description,
+      category,
+      tags:           tags || [],
+      price,
+      license,
+      fileCid,
+      metadataCid,
+      metadataUri,
       creatorAddress: req.user.wallet,
-      status: "pending",
-      createdAt: new Date(),
-      updatedAt: new Date()
+      status:         "pending",
+      createdAt:      new Date(),
+      updatedAt:      new Date()
     });
+
     res.status(201).json({ asset: assetDoc });
   } catch (err) {
     console.error("Metadata error:", err);
