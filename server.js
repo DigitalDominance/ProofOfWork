@@ -606,7 +606,7 @@ app.get("/api/chat/conversations", requireAuth, async (req, res) => {
 // ─── MARKETPLACE UPLOAD & METADATA API ────────────────────────────────────────
 
 // Configure Pinata SDK
-const { PinataSDK } = require("pinata");
+
 const pinata = new PinataSDK({
   pinataJwt:     process.env.PINATA_JWT,
   pinataGateway: process.env.PINATA_GATEWAY,
