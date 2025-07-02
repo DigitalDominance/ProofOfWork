@@ -141,7 +141,7 @@ const assetSchema = new mongoose.Schema({
   price:         { type: String, required: true },
   license:       { type: String, enum: ["standard", "exclusive"], required: true },
   fileCid:       { type: String, required: true },
-  fileSize:      { type: String, required: true },
+  fileSize:      { type: String },
   metadataCid:   { type: String, required: true },
   metadataUri:   { type: String, required: true },
   tokenId:       { type: String, default: null },
