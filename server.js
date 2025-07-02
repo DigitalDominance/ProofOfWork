@@ -141,7 +141,7 @@ const assetSchema = new mongoose.Schema({
   price:         { type: String, required: true },
   license:       { type: String, enum: ["standard", "exclusive"], required: true },
   fileCid:       { type: String, required: true },
-  fileSize:      { type: String },
+  fileSize:      { type: String, required: true },
   metadataCid:   { type: String, required: true },
   metadataUri:   { type: String, required: true },
   tokenId:       { type: String, default: null },
@@ -665,23 +665,7 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
     const metadataCid = jsonResult.cid;
     const metadataUri = `ipfs://${metadataCid}`;
 
-    const assetDoc = await Asset.create({
-      title,
-      description,
-      category,
-      tags:           tags || [],
-      price,
-      license,
-      fileCid,
-      metadataCid,
-      metadataUri,
-      creatorAddress: req.user.wallet,
-      status:         "pending",
-      createdAt:      new Date(),
-      updatedAt:      new Date()
-    });
-
-    res.status(201).json({ asset: assetDoc });
+    res.status(201).json({ metadataUri });
   } catch (err) {
     console.error("Metadata error:", err);
     res.status(500).json({ error: "Metadata pinning failed" });
