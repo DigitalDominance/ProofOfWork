@@ -687,6 +687,171 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/api/assets", async (req, res) => {
+  try {
+    const assets = await Asset.find().select(
+      "title description category tags price license fileCid metadataCid metadataUri tokenId creatorAddress status downloads rating reviewCount createdAt updatedAt"
+    );
+    res.json(assets);
+  } catch (err) {
+    console.error("Error fetching assets:", err);
+    res.status(500).json({ error: "Failed to fetch assets" });
+  }
+});
+
+app.post("/api/assets", requireAuth, async (req, res) => {
+  try {
+    const { title, description, category, tags, price, license, fileCid, metadataCid, metadataUri, transactionHash } =
+      req.body;
+
+    // Validate input
+    if (!title || !description || !category || !price || !license || !fileCid || !metadataCid || !metadataUri || !transactionHash) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // Initialize ethers.js provider
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+
+    // Get the transaction receipt
+    const receipt = await provider.getTransactionReceipt(transactionHash);
+    if (!receipt || receipt.status !== 1) {
+      return res.status(400).json({ error: "Invalid or failed transaction" });
+    }
+
+    // Save the asset in the database
+    const asset = await Asset.create({
+      title,
+      description,
+      category,
+      tags,
+      price,
+      license,
+      fileCid,
+      metadataCid,
+      metadataUri,
+      creatorAddress: req.user.wallet,
+      status: "active",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    res.status(201).json({ assetId: asset._id });
+  } catch (err) {
+    console.error("Error saving asset:", err);
+    res.status(500).json({ error: "Failed to save asset" });
+  }
+});
+
+app.post("/api/mint-standard", requireAuth, async (req, res) => {
+  try {
+    const { txHash, assetId, quantity } = req.body;
+
+    // Validate input
+    if (!txHash || !assetId || !quantity) {
+      return res.status(400).json({ error: "txHash, assetId, and quantity are required" });
+    }
+
+    // Fetch the asset from the database
+    const asset = await Asset.findById(assetId);
+    if (!asset || asset.license !== "standard") {
+      return res.status(404).json({ error: "Asset not found or invalid license type" });
+    }
+
+    // Initialize ethers.js provider
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+
+    // Get the transaction receipt
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (!receipt || receipt.status !== 1) {
+      return res.status(400).json({ error: "Invalid or failed transaction" });
+    }
+
+    // Validate the transaction
+    const logs = receipt.logs;
+    const purchaseEvent = logs.find((log) =>
+      log.topics[0] === ethers.id("AssetPurchased(address,uint256,uint256,uint256)")
+    );
+
+    if (!purchaseEvent) {
+      return res.status(400).json({ error: "Purchase event not found in transaction" });
+    }
+
+    const [buyer, id, amount, price] = ethers.defaultAbiCoder.decode(
+      ["address", "uint256", "uint256", "uint256"],
+      purchaseEvent.data
+    );
+
+    if (id.toString() !== assetId.toString() || amount.toString() !== quantity.toString()) {
+      return res.status(400).json({ error: "Asset ID or quantity mismatch" });
+    }
+
+    // Update the asset's status in the database
+    asset.status = "active";
+    asset.purchases = (asset.purchases || 0) + parseInt(amount.toString(), 10);
+    await asset.save();
+
+    res.json({ message: "Purchase confirmed", txHash });
+  } catch (err) {
+    console.error("Mint standard error:", err);
+    res.status(500).json({ error: "Failed to confirm purchase" });
+  }
+});
+
+app.post("/api/mint-exclusive", requireAuth, async (req, res) => {
+  try {
+    const { txHash, assetId } = req.body;
+
+    // Validate input
+    if (!txHash || !assetId) {
+      return res.status(400).json({ error: "txHash and assetId are required" });
+    }
+
+    // Fetch the asset from the database
+    const asset = await Asset.findById(assetId);
+    if (!asset || asset.license !== "exclusive") {
+      return res.status(404).json({ error: "Asset not found or invalid license type" });
+    }
+
+    // Initialize ethers.js provider
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+
+    // Get the transaction receipt
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (!receipt || receipt.status !== 1) {
+      return res.status(400).json({ error: "Invalid or failed transaction" });
+    }
+
+    // Validate the transaction
+    const logs = receipt.logs;
+    const purchaseEvent = logs.find((log) =>
+      log.topics[0] === ethers.id("ExclusivePurchased(address,uint256,uint256)")
+    );
+
+    if (!purchaseEvent) {
+      return res.status(400).json({ error: "Purchase event not found in transaction" });
+    }
+
+    const [buyer, id, price] = ethers.defaultAbiCoder.decode(
+      ["address", "uint256", "uint256"],
+      purchaseEvent.data
+    );
+
+    if (id.toString() !== assetId.toString()) {
+      return res.status(400).json({ error: "Asset ID mismatch" });
+    }
+
+    // Update the asset's status in the database
+    asset.status = "active";
+    asset.tokenId = id;
+    await asset.save();
+
+    res.json({ message: "Purchase confirmed", txHash });
+  } catch (err) {
+    console.error("Mint exclusive error:", err);
+    res.status(500).json({ error: "Failed to confirm purchase" });
+  }
+});
+
 // ─── SOCKET.IO ────────────────────────────────────────────────────────────────
 io.on("connection", (socket) => {
   console.log("WS connected:", socket.id);
