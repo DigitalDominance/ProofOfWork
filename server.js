@@ -141,6 +141,7 @@ const assetSchema = new mongoose.Schema({
   price:         { type: String, required: true },
   license:       { type: String, enum: ["standard", "exclusive"], required: true },
   fileCid:       { type: String, required: true },
+  fileSize:      { type: String, required: true },
   metadataCid:   { type: String, required: true },
   metadataUri:   { type: String, required: true },
   tokenId:       { type: String, default: null },
@@ -701,11 +702,11 @@ app.get("/api/assets", async (req, res) => {
 
 app.post("/api/assets", requireAuth, async (req, res) => {
   try {
-    const { title, description, category, tags, price, license, fileCid, metadataCid, metadataUri, transactionHash } =
+    const { title, description, category, tags, price, license, fileCid, metadataCid, metadataUri, transactionHash, fileSize } =
       req.body;
 
     // Validate input
-    if (!title || !description || !category || !price || !license || !fileCid || !metadataCid || !metadataUri || !transactionHash) {
+    if (!title || !description || !category || !price || !license || !fileCid || !metadataCid || !metadataUri || !transactionHash || !fileSize) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
@@ -718,6 +719,24 @@ app.post("/api/assets", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Invalid or failed transaction" });
     }
 
+    // Extract the `id` from the respective event
+    const eventName = license === "standard" ? "AssetRegistered" : "AssetRegisteredExclusive";
+    const event = receipt.logs
+      .map((log) => {
+        try {
+          return contract.interface.parseLog(log);
+        } catch {
+          return null;
+        }
+      })
+      .find((parsedLog) => parsedLog && parsedLog.name === eventName);
+
+    if (!event) {
+      return res.status(400).json({ error: `${eventName} event not found in transaction` });
+    }
+
+    const { id: tokenId } = event.args;
+
     // Save the asset in the database
     const asset = await Asset.create({
       title,
@@ -727,7 +746,9 @@ app.post("/api/assets", requireAuth, async (req, res) => {
       price,
       license,
       fileCid,
+      fileSize,
       metadataCid,
+      tokenId,
       metadataUri,
       creatorAddress: req.user.wallet,
       status: "active",
@@ -787,7 +808,7 @@ app.post("/api/mint-standard", requireAuth, async (req, res) => {
 
     // Update the asset's status in the database
     asset.status = "active";
-    asset.purchases = (asset.purchases || 0) + parseInt(amount.toString(), 10);
+    asset.downloads = (asset.downloads || 0) + parseInt(amount.toString(), 10);
     await asset.save();
 
     res.json({ message: "Purchase confirmed", txHash });
@@ -842,7 +863,7 @@ app.post("/api/mint-exclusive", requireAuth, async (req, res) => {
 
     // Update the asset's status in the database
     asset.status = "active";
-    asset.tokenId = id;
+    asset.downloads = (asset.downloads || 0) + parseInt(amount.toString(), 10);
     await asset.save();
 
     res.json({ message: "Purchase confirmed", txHash });
