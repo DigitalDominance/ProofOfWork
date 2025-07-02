@@ -665,7 +665,7 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
     const metadataCid = jsonResult.cid;
     const metadataUri = `ipfs://${metadataCid}`;
 
-    res.status(201).json({ metadataUri });
+    res.status(201).json({ metadataUri, metadataCid });
   } catch (err) {
     console.error("Metadata error:", err);
     res.status(500).json({ error: "Metadata pinning failed" });
