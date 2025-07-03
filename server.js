@@ -10,12 +10,15 @@ const rateLimit = require("express-rate-limit");
 
 // Add Pinata SDK, multer, and stream utilities for uploads
 const { PinataSDK } = require("pinata");
-const multer      = require("multer");
+const multer = require("multer");
 const { Readable } = require("stream");
-const { Blob }      = require("buffer");
+const { Blob } = require("buffer");
 
 const app = express();
 const server = http.createServer(app);
+
+const STANDARD_LICENSE_1155 = require("./abis/StandardLicense1155.json");
+const EXCLUSIVE_LICENSE_721 = require("./abis/ExclusiveLicense721.json");
 
 // ─── CORS CONFIGURATION ────────────────────────────────────────────────────────
 // Allow https://www.proofofworks.com (and its subdomains) plus localhost for dev
@@ -67,55 +70,55 @@ mongoose.connection.once("open", () => console.log("✅ MongoDB connected"));
 
 // ─── MONGOOSE MODELS ────────────────────────────────────────────────────────────
 const userSchema = new mongoose.Schema({
-  wallet:       { type: String, unique: true, required: true },
-  displayName:  { type: String, required: true, immutable: true },
-  role:         { type: String, enum: ["employer", "worker"], required: true },
-  createdAt:    { type: Date, default: Date.now },
+  wallet: { type: String, unique: true, required: true },
+  displayName: { type: String, required: true, immutable: true },
+  role: { type: String, enum: ["employer", "worker"], required: true },
+  createdAt: { type: Date, default: Date.now },
 });
 const POWUser = mongoose.model("POWUser", userSchema);
 
 const jobSchema = new mongoose.Schema({
-  paymentType:     { type: String, enum: ["WEEKLY", "ONE_OFF"], required: true },
-  jobName:         { type: String, required: true },
-  jobDescription:  { type: String, required: true },
-  jobTags:         { type: [String], default: [] },
+  paymentType: { type: String, enum: ["WEEKLY", "ONE_OFF"], required: true },
+  jobName: { type: String, required: true },
+  jobDescription: { type: String, required: true },
+  jobTags: { type: [String], default: [] },
   employerAddress: { type: String, required: true },
   employeeAddress: { type: String, default: null },
-  status:          { type: String, enum: ["OPEN", "IN_PROGRESS", "FINISHED"], default: "OPEN" },
-  createdAt:       { type: Date, default: Date.now },
+  status: { type: String, enum: ["OPEN", "IN_PROGRESS", "FINISHED"], default: "OPEN" },
+  createdAt: { type: Date, default: Date.now },
 });
 const POWJob = mongoose.model("POWJob", jobSchema);
 
 const taskSchema = new mongoose.Schema({
-  taskName:        { type: String, required: true },
+  taskName: { type: String, required: true },
   taskDescription: { type: String, required: true },
-  taskTags:        { type: [String], default: [] },
-  workerAddress:   { type: String, required: true },
-  kasAmount:       { type: String },
-  paymentType:     { type: String, enum: ["oneoff"], default: "oneoff" },
-  duration:        { type: String },
-  status:          { type: String, enum: ["OPEN", "OFFERED", "CONVERTED"], default: "OPEN" },
-  createdAt:       { type: Date, default: Date.now },
+  taskTags: { type: [String], default: [] },
+  workerAddress: { type: String, required: true },
+  kasAmount: { type: String },
+  paymentType: { type: String, enum: ["oneoff"], default: "oneoff" },
+  duration: { type: String },
+  status: { type: String, enum: ["OPEN", "OFFERED", "CONVERTED"], default: "OPEN" },
+  createdAt: { type: Date, default: Date.now },
 });
 const POWTask = mongoose.model("POWTask", taskSchema);
 
 const offerSchema = new mongoose.Schema({
-  task:             { type: mongoose.Schema.Types.ObjectId, ref: "POWTask", required: true },
-  employerAddress:  { type: String, required: true },
-  workerAddress:    { type: String, required: true },
-  status:           { type: String, enum: ["PENDING", "DECLINED", "ACCEPTED"], default: "PENDING" },
-  kasAmount:        { type: String },
-  paymentType:      { type: String, enum: ["weekly", "oneoff"] },
-  duration:         { type: String },
-  createdAt:        { type: Date, default: Date.now },
+  task: { type: mongoose.Schema.Types.ObjectId, ref: "POWTask", required: true },
+  employerAddress: { type: String, required: true },
+  workerAddress: { type: String, required: true },
+  status: { type: String, enum: ["PENDING", "DECLINED", "ACCEPTED"], default: "PENDING" },
+  kasAmount: { type: String },
+  paymentType: { type: String, enum: ["weekly", "oneoff"] },
+  duration: { type: String },
+  createdAt: { type: Date, default: Date.now },
 });
 const POWOffer = mongoose.model("POWOffer", offerSchema);
 
 const messageSchema = new mongoose.Schema({
-  disputeId:  { type: Number, required: true, index: true },
-  sender:     { type: String, required: true },
-  content:    { type: String, required: true },
-  createdAt:  { type: Date, default: Date.now },
+  disputeId: { type: Number, required: true, index: true },
+  sender: { type: String, required: true },
+  content: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
 });
 messageSchema.index(
   { createdAt: 1 },
@@ -125,33 +128,33 @@ const POWMessage = mongoose.model("POWMessage", messageSchema);
 
 const chatSchema = new mongoose.Schema({
   participants: { type: [String], required: true, index: true },
-  sender:       { type: String, required: true },
-  receiver:     { type: String, required: true },
-  content:      { type: String, required: true },
-  createdAt:    { type: Date, default: Date.now },
+  sender: { type: String, required: true },
+  receiver: { type: String, required: true },
+  content: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
 });
 const POWChatMessage = mongoose.model("POWChatMessage", chatSchema);
 
 // ─── ASSET MODEL (for marketplace) ─────────────────────────────────────────────
 const assetSchema = new mongoose.Schema({
-  title:         { type: String, required: true },
-  description:   { type: String, required: true },
-  category:      { type: String, required: true },
-  tags:          { type: [String], default: [] },
-  price:         { type: String, required: true },
-  license:       { type: String, enum: ["standard", "exclusive"], required: true },
-  fileCid:       { type: String, required: true },
-  fileSize:      { type: String, required: true },
-  metadataCid:   { type: String, required: true },
-  metadataUri:   { type: String, required: true },
-  tokenId:       { type: String, default: null },
-  creatorAddress:{ type: String, required: true },
-  status:        { type: String, enum: ["pending", "active", "sold"], default: "pending" },
-  downloads:     { type: Number, default: 0 },
-  rating:        { type: Number, default: 0 },
-  reviewCount:   { type: Number, default: 0 },
-  createdAt:     { type: Date, default: Date.now },
-  updatedAt:     { type: Date, default: Date.now },
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  category: { type: String, required: true },
+  tags: { type: [String], default: [] },
+  price: { type: String, required: true },
+  license: { type: String, enum: ["standard", "exclusive"], required: true },
+  fileCid: { type: String, required: true },
+  fileSize: { type: String, required: true },
+  metadataCid: { type: String, required: true },
+  metadataUri: { type: String, required: true },
+  tokenId: { type: String, default: null },
+  creatorAddress: { type: String, required: true },
+  status: { type: String, enum: ["pending", "active", "sold"], default: "pending" },
+  downloads: { type: Number, default: 0 },
+  rating: { type: Number, default: 0 },
+  reviewCount: { type: Number, default: 0 },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
 });
 const Asset = mongoose.model("Asset", assetSchema);
 
@@ -162,7 +165,7 @@ app.post("/api/auth/challenge", (req, res) => {
   const { wallet } = req.body;
   if (!wallet) return res.status(400).json({ error: "Wallet required" });
   const challenge = `ProofOfWork login: ${Date.now()}|${Math.random()}`;
-  const expires  = Date.now() + (parseInt(process.env.CHALLENGE_EXPIRY_MIN, 10) || 10) * 60_000;
+  const expires = Date.now() + (parseInt(process.env.CHALLENGE_EXPIRY_MIN, 10) || 10) * 60_000;
   challenges.set(wallet.toLowerCase(), { challenge, expires });
   res.json({ challenge });
 });
@@ -188,7 +191,7 @@ app.post("/api/auth/verify", async (req, res) => {
       user = await POWUser.create({ wallet, displayName, role });
     }
 
-    const accessToken  = jwt.sign(
+    const accessToken = jwt.sign(
       { wallet, role: user.role },
       process.env.JWT_ACCESS_SECRET,
       { expiresIn: "15m" }
@@ -368,9 +371,9 @@ app.post("/api/tasks/:taskId/offers", requireAuth, async (req, res) => {
   const { kasAmount, paymentType, duration } = req.body;
 
   const offer = await POWOffer.create({
-    task:            task._id,
+    task: task._id,
     employerAddress: req.user.wallet,
-    workerAddress:   task.workerAddress,
+    workerAddress: task.workerAddress,
     kasAmount,
     paymentType,
     duration,
@@ -419,7 +422,7 @@ app.get("/api/offers", requireAuth, async (req, res) => {
 
   const filter = {};
   if (employerAddress) filter.employerAddress = employerAddress;
-  if (workerAddress)   filter.workerAddress   = workerAddress;
+  if (workerAddress) filter.workerAddress = workerAddress;
 
   try {
     const offers = await POWOffer
@@ -520,7 +523,7 @@ app.post("/api/messages", requireAuth, async (req, res) => {
   try {
     const msg = await POWMessage.create({
       disputeId: Number(disputeId),
-      sender:    req.user.wallet,
+      sender: req.user.wallet,
       content,
     });
     io.to(`dispute_${disputeId}`).emit("newMessage", msg);
@@ -532,9 +535,9 @@ app.post("/api/messages", requireAuth, async (req, res) => {
 });
 
 app.get("/api/messages/:disputeId", requireAuth, async (req, res) => {
-  const page  = parseInt(req.query.page, 10)  || 1;
+  const page = parseInt(req.query.page, 10) || 1;
   const limit = parseInt(req.query.limit, 10) || 50;
-  const msgs  = await POWMessage.find({ disputeId: req.params.disputeId })
+  const msgs = await POWMessage.find({ disputeId: req.params.disputeId })
     .sort({ createdAt: 1 })
     .skip((page - 1) * limit)
     .limit(limit);
@@ -551,7 +554,7 @@ app.post("/api/chat/messages", requireAuth, async (req, res) => {
     const participants = [from, to].sort();
     const chatMsg = await POWChatMessage.create({
       participants,
-      sender:   from,
+      sender: from,
       receiver: to,
       content,
     });
@@ -565,9 +568,9 @@ app.post("/api/chat/messages", requireAuth, async (req, res) => {
 });
 
 app.get("/api/chat/messages/:peer", requireAuth, async (req, res) => {
-  const peer  = req.params.peer;
-  const user  = req.user.wallet;
-  const page  = parseInt(req.query.page, 10)  || 1;
+  const peer = req.params.peer;
+  const user = req.user.wallet;
+  const page = parseInt(req.query.page, 10) || 1;
   const limit = parseInt(req.query.limit, 10) || 50;
   const participants = [user, peer].sort();
 
@@ -580,8 +583,8 @@ app.get("/api/chat/messages/:peer", requireAuth, async (req, res) => {
 });
 
 app.get("/api/chat/conversations", requireAuth, async (req, res) => {
-  const user  = req.user.wallet;
-  const page  = parseInt(req.query.page,  10) || 1;
+  const user = req.user.wallet;
+  const page = parseInt(req.query.page, 10) || 1;
   const limit = parseInt(req.query.limit, 10) || 10;
 
   const userRegex = new RegExp(`^${user}$`, "i");
@@ -589,7 +592,7 @@ app.get("/api/chat/conversations", requireAuth, async (req, res) => {
   try {
     const msgs = await POWChatMessage.find({
       $or: [
-        { sender:   userRegex },
+        { sender: userRegex },
         { receiver: userRegex }
       ]
     })
@@ -607,7 +610,7 @@ app.get("/api/chat/conversations", requireAuth, async (req, res) => {
 
 // Configure Pinata SDK
 const pinata = new PinataSDK({
-  pinataJwt:     process.env.PINATA_JWT,
+  pinataJwt: process.env.PINATA_JWT,
   pinataGateway: process.env.PINATA_GATEWAY,
 });
 
@@ -620,7 +623,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     const { originalname, mimetype, size, buffer } = req.file;
     const options = {
       pinataMetadata: { name: originalname },
-      pinataOptions:  { cidVersion: 1 }
+      pinataOptions: { cidVersion: 1 }
     };
 
     // Convert Node Buffer → Blob so pinata.upload.public.file can append it
@@ -633,7 +636,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     const cid = uploadResult.cid;
     const url = `https://${process.env.PINATA_GATEWAY}/ipfs/${cid}`;
 
-    res.json({ cid, url, size, mimeType: mimetype });
+    res.json({ cid, url, size: `${(size / 1024 / 1024).toFixed(2)} MB`, mimeType: mimetype });
   } catch (err) {
     console.error("Upload error:", err);
     res.status(500).json({ error: "File upload failed" });
@@ -649,12 +652,12 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
     }
 
     const metadata = {
-      name:        title,
+      name: title,
       description,
-      image:       `ipfs://${fileCid}`,
+      image: `ipfs://${fileCid}`,
       attributes: [
         { trait_type: "Category", value: category },
-        { trait_type: "License",  value: license }
+        { trait_type: "License", value: license }
       ]
     };
 
@@ -703,6 +706,18 @@ app.post("/api/assets", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Invalid or failed transaction" });
     }
 
+    const contract = license === "standard"
+      ? new ethers.Contract(
+        process.env.NEXT_PUBLIC_ERC1155_ADDRESS || '',
+        STANDARD_LICENSE_1155,
+        provider
+      )
+      : new ethers.Contract(
+        process.env.NEXT_PUBLIC_ERC721_ADDRESS || '',
+        EXCLUSIVE_LICENSE_721,
+        provider
+      );
+
     // Extract the `id` from the respective event
     const eventName = license === "standard" ? "AssetRegistered" : "AssetRegisteredExclusive";
     const event = receipt.logs
@@ -719,7 +734,7 @@ app.post("/api/assets", requireAuth, async (req, res) => {
       return res.status(400).json({ error: `${eventName} event not found in transaction` });
     }
 
-    const { id: tokenId } = event.args;
+    const [tokenId] = event?.args || [];
 
     // Save the asset in the database
     const asset = await Asset.create({
