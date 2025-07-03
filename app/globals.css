@@ -1,0 +1,138 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Varien Font Face Declarations */
+@font-face {
+  font-family: "Varien";
+  src: url("/fonts/Varien.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Varien";
+  src: url("/fonts/Varien-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Varien Outline";
+  src: url("/fonts/Varien-Outline.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Varien Outline";
+  src: url("/fonts/Varien-Italic-Outline.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 224 71.4% 4.1%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 71.4% 4.1%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 71.4% 4.1%;
+    --primary: 220.9 39.3% 11%;
+    --primary-foreground: 210 20% 98%;
+    --secondary: 220 14.3% 95.9%;
+    --secondary-foreground: 220.9 39.3% 11%;
+    --muted: 220 14.3% 95.9%;
+    --muted-foreground: 220 8.9% 46.1%;
+
+    /* Custom Accent Color: #49EACB */
+    --accent: 169 79% 60%; /* HSL for #49EACB */
+    --accent-hover: 169 65% 55%; /* Darker shade for hover */
+    --accent-foreground: 224 71.4% 4.1%; /* Text on accent - dark for light accent */
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 224 71.4% 4.1%;
+    --radius: 0.75rem;
+
+    /* Font family variables */
+    --font-varien: "Varien", ui-sans-serif, system-ui, sans-serif;
+    --font-varien-outline: "Varien Outline", ui-sans-serif, system-ui, sans-serif;
+    --font-varela: "Varela Round", ui-rounded, "Hiragino Sans GB", sans-serif;    
+  }
+
+  .dark {
+    --background: 224 71.4% 4.1%;
+    --foreground: 210 20% 98%;
+    --card: 224 71.4% 4.1%;
+    --card-foreground: 210 20% 98%;
+    --popover: 224 71.4% 4.1%;
+    --popover-foreground: 210 20% 98%;
+    --primary: 210 20% 98%;
+    --primary-foreground: 220.9 39.3% 11%;
+    --secondary: 215 27.9% 16.9%;
+    --secondary-foreground: 210 20% 98%;
+    --muted: 215 27.9% 16.9%;
+    --muted-foreground: 217.9 10.6% 64.9%;
+
+    /* Custom Accent Color: #49EACB */
+    --accent: 169 79% 60%; /* HSL for #49EACB */
+    --accent-hover: 169 65% 55%; /* Darker shade for hover */
+    --accent-foreground: 224 71.4% 4.1%; /* Text on accent - can be dark if accent is light enough */
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 215 27.9% 16.9%;
+    --input: 215 27.9% 16.9%;
+    --ring: 210 20% 98%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Custom scrollbar for a more modern look */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-muted/50;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-accent/70;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-accent;
+}
+
+/* Glassmorphism effect utility */
+.glass-effect {
+  @apply bg-card/60 backdrop-blur-lg border border-border/30;
+}
+
+/* Logo glow effect */
+.logo-glow {
+  transition: all 0.3s ease;
+}
+
+.logo-glow:hover {
+  filter: drop-shadow(0 0 20px hsl(var(--accent)));
+  transform: scale(1.1);
+}
