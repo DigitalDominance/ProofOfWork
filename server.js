@@ -853,7 +853,8 @@ app.post("/api/mint-exclusive", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Purchase event not found in transaction" });
     }
 
-    const [buyer, id, price] = ethers.defaultAbiCoder.decode(
+    const abiCoder = new AbiCoder();
+    const [buyer, id, price] = abiCoder.decode(
       ["address", "uint256", "uint256"],
       purchaseEvent.data
     );
