@@ -19,6 +19,7 @@ const server = http.createServer(app);
 
 const STANDARD_LICENSE_1155 = require("./abis/StandardLicense1155.json");
 const EXCLUSIVE_LICENSE_721 = require("./abis/ExclusiveLicense721.json");
+const { AbiCoder } = require("ethers");
 
 // ─── CORS CONFIGURATION ────────────────────────────────────────────────────────
 // Allow https://www.proofofworks.com (and its subdomains) plus localhost for dev
@@ -796,7 +797,8 @@ app.post("/api/mint-standard", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Purchase event not found in transaction" });
     }
 
-    const [buyer, id, amount, price] = ethers.defaultAbiCoder.decode(
+    const abiCoder = new AbiCoder();
+    const [buyer, id, amount, price] = abiCoder.decode(
       ["address", "uint256", "uint256", "uint256"],
       purchaseEvent.data
     );
