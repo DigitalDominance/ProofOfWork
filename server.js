@@ -772,7 +772,7 @@ app.post("/api/mint-standard", requireAuth, async (req, res) => {
     }
 
     // Fetch the asset from the database
-    const asset = await Asset.findById(assetId);
+    const asset = await Asset.findOne({ tokenId: assetId });
     if (!asset || asset.license !== "standard") {
       return res.status(404).json({ error: "Asset not found or invalid license type" });
     }
@@ -827,7 +827,7 @@ app.post("/api/mint-exclusive", requireAuth, async (req, res) => {
     }
 
     // Fetch the asset from the database
-    const asset = await Asset.findById(assetId);
+    const asset = await Asset.findOne({ tokenId: assetId });
     if (!asset || asset.license !== "exclusive") {
       return res.status(404).json({ error: "Asset not found or invalid license type" });
     }
