@@ -149,6 +149,7 @@ const assetSchema = new mongoose.Schema({
   metadataCid: { type: String, required: true },
   metadataUri: { type: String, required: true },
   tokenId: { type: String, default: null },
+  mimeType: { type: String, default: null },
   creatorAddress: { type: String, required: true },
   status: { type: String, enum: ["pending", "active", "sold"], default: "pending" },
   downloads: { type: Number, default: 0 },
@@ -690,11 +691,11 @@ app.get("/api/assets", async (req, res) => {
 
 app.post("/api/assets", requireAuth, async (req, res) => {
   try {
-    const { title, description, category, tags, price, license, fileCid, metadataCid, metadataUri, transactionHash, fileSize } =
+    const { title, description, category, tags, price, license, fileCid, metadataCid, metadataUri, transactionHash, fileSize, mimeType } =
       req.body;
 
     // Validate input
-    if (!title || !description || !category || !price || !license || !fileCid || !metadataCid || !metadataUri || !transactionHash || !fileSize) {
+    if (!title || !description || !category || !price || !license || !fileCid || !metadataCid || !metadataUri || !transactionHash || !fileSize || !mimeType) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
@@ -749,6 +750,7 @@ app.post("/api/assets", requireAuth, async (req, res) => {
       fileSize,
       metadataCid,
       tokenId,
+      mimeType,
       metadataUri,
       creatorAddress: req.user.wallet,
       status: "active",
