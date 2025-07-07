@@ -799,11 +799,24 @@ app.post("/api/mint-standard", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Purchase event not found in transaction" });
     }
 
-    const abiCoder = new AbiCoder();
-    const [buyer, id, amount, price] = abiCoder.decode(
-      ["address", "uint256", "uint256", "uint256"],
-      purchaseEvent.data
-    );
+    // Create an interface to properly decode the event
+    const eventInterface = new ethers.Interface([
+      "event AssetPurchased(address indexed buyer,  uint256 indexed id, uint256 amount, uint256 price)"
+    ]);
+
+    const decodedEvent = eventInterface.parseLog({
+      topics: purchaseEvent.topics,
+      data: purchaseEvent.data
+    });
+
+
+    const { buyer, id, amount, price } = decodedEvent.args;
+
+    // const abiCoder = new AbiCoder();
+    // const [buyer, id, amount, price] = abiCoder.decode(
+    //   ["address", "uint256", "uint256", "uint256"],
+    //   purchaseEvent.data
+    // );
 
     if (id.toString() !== assetId.toString() || amount.toString() !== quantity.toString()) {
       return res.status(400).json({ error: "Asset ID or quantity mismatch" });
@@ -855,11 +868,23 @@ app.post("/api/mint-exclusive", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Purchase event not found in transaction" });
     }
 
-    const abiCoder = new AbiCoder();
-    const [buyer, id, price] = abiCoder.decode(
-      ["address", "uint256", "uint256"],
-      purchaseEvent.data
-    );
+    // Create an interface to properly decode the event
+    const eventInterface = new ethers.Interface([
+      "event ExclusivePurchased(address indexed buyer, uint256 indexed id, uint256 price)"
+    ]);
+
+    const decodedEvent = eventInterface.parseLog({
+      topics: purchaseEvent.topics,
+      data: purchaseEvent.data
+    });
+
+    const { buyer, id, amount, price } = decodedEvent.args;
+
+    // const abiCoder = new AbiCoder();
+    // const [buyer, id, price] = abiCoder.decode(
+    //   ["address", "uint256", "uint256"],
+    //   purchaseEvent.data
+    // );
 
     if (id.toString() !== assetId.toString()) {
       return res.status(400).json({ error: "Asset ID mismatch" });
