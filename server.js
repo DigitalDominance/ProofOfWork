@@ -680,7 +680,7 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
 app.get("/api/assets", async (req, res) => {
   try {
     const assets = await Asset.find().select(
-      "title description category tags price license fileCid fileSize metadataCid metadataUri tokenId creatorAddress status downloads rating reviewCount createdAt updatedAt"
+      "title description category tags price license fileCid fileSize mimeType metadataCid metadataUri tokenId creatorAddress status downloads rating reviewCount createdAt updatedAt"
     );
     res.json(assets);
   } catch (err) {
