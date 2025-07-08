@@ -902,6 +902,112 @@ app.post("/api/mint-exclusive", requireAuth, async (req, res) => {
   }
 });
 
+const getExclusivePurchases = async (userAddress, fromBlock = 0) => {
+  try {
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+
+    const exclusiveContract = new ethers.Contract(
+      process.env.NEXT_PUBLIC_ERC721_ADDRESS || '',
+      EXCLUSIVE_LICENSE_721,
+      provider
+    );
+
+    const currentBlock = await provider.getBlockNumber();
+    const toBlock = currentBlock;
+
+    const filter = exclusiveContract.filters.ExclusivePurchased(userAddress);
+    const events = await exclusiveContract.queryFilter(
+      filter,
+      Math.max(fromBlock, currentBlock),
+      toBlock
+    );
+
+    const purchases = [];
+
+    for(const event of events) {
+      const { buyer, id, price } = event.args;
+
+      const block = await this.provider.getBlock(event.blockNumber);
+
+      const asset = await Asset.findOne({
+        tokenId: id
+      });
+
+      purchases.push({
+        asset,
+        purchaseDate: new Date(block.timestamp * 1000),
+        licenseType: 'Exclusive',
+        price: price.toString()
+      })
+    }
+  } catch (error) {
+    
+  }
+}
+
+const getStandardPurchases = async (userAddress, fromBlock = 0) => {
+  try {
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+
+    const standardContract = new ethers.Contract(
+      process.env.NEXT_PUBLIC_ERC1155_ADDRESSS || '',
+      STANDARD_LICENSE_1155,
+      provider
+    );
+
+    const currentBlock = await provider.getBlockNumber();
+    const toBlock = currentBlock;
+
+    const filter = standardContract.filters.AssetPurchased(userAddress);
+    const events = await standardContract.queryFilter(
+      filter,
+      Math.max(fromBlock, currentBlock),
+      toBlock
+    );
+
+    const purchases = [];
+
+    for(const event of events) {
+      const { buyer, id, price } = event.args;
+
+      const block = await this.provider.getBlock(event.blockNumber);
+
+      const asset = await Asset.findOne({
+        tokenId: id
+      });
+
+      purchases.push({
+        asset,
+        purchaseDate: new Date(block.timestamp * 1000),
+        licenseType: 'Standard',
+        price: price.toString()
+      })
+    }
+  } catch (error) {
+    
+  }
+}
+
+app.get('/api/purchases', requireAuth, async (req, res) => {
+  try {
+    const userAddress = req.user.wallet;
+
+    const [exclusivePurchases, standardPurchases] = await Promise.all([
+      getExclusivePurchases(userAddress),
+      getStandardPurchases(userAddress)
+    ]);
+
+    const allPurchases = [...exclusivePurchases, ...standardPurchases];
+
+    allPurchases.sort((a, b) => b.purchaseDate.getTime() - a.purchaseDate.getTime());
+
+    return { assets: allPurchases };
+  } catch (error) {
+    console.error("Error fetching purchases:", error);
+    res.status(500).json({ error: "Failed to fetch purchases" });
+  }
+});
+
 // ─── SOCKET.IO ────────────────────────────────────────────────────────────────
 io.on("connection", (socket) => {
   console.log("WS connected:", socket.id);
