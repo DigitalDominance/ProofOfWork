@@ -999,7 +999,7 @@ app.get('/api/purchases', requireAuth, async (req, res) => {
       getStandardPurchases(userAddress)
     ]);
 
-    const allPurchases = [...(Array.isArray(exclusivePurchases) ? exclusivePurchases : []), ...(Array.isArray(standardPurchases) ? standardPurchases : [])];
+    let allPurchases = [...(Array.isArray(exclusivePurchases) ? exclusivePurchases : []), ...(Array.isArray(standardPurchases) ? standardPurchases : [])];
 
     allPurchases.sort((a, b) => b.purchaseDate.getTime() - a.purchaseDate.getTime());
     allPurchases = allPurchases.filter((purchase) => purchase.asset !== null);
