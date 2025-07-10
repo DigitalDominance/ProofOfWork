@@ -140,6 +140,7 @@ const POWChatMessage = mongoose.model("POWChatMessage", chatSchema);
 const assetSchema = new mongoose.Schema({
   title: { type: String, required: true },
   description: { type: String, required: true },
+  type: { type: String, default: null },
   category: { type: String, required: true },
   tags: { type: [String], default: [] },
   price: { type: String, required: true },
@@ -680,7 +681,7 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
 app.get("/api/assets", async (req, res) => {
   try {
     const assets = await Asset.find().select(
-      "title description category tags price license fileCid fileSize mimeType metadataCid metadataUri tokenId creatorAddress status downloads rating reviewCount createdAt updatedAt"
+      "title description type category tags price license fileCid fileSize mimeType metadataCid metadataUri tokenId creatorAddress status downloads rating reviewCount createdAt updatedAt"
     );
     res.json(assets);
   } catch (err) {
@@ -691,7 +692,7 @@ app.get("/api/assets", async (req, res) => {
 
 app.post("/api/assets", requireAuth, async (req, res) => {
   try {
-    const { title, description, category, tags, price, license, fileCid, metadataCid, metadataUri, transactionHash, fileSize, mimeType } =
+    const { title, description, type, category, tags, price, license, fileCid, metadataCid, metadataUri, transactionHash, fileSize, mimeType } =
       req.body;
 
     // Validate input
@@ -742,6 +743,7 @@ app.post("/api/assets", requireAuth, async (req, res) => {
     const asset = await Asset.create({
       title,
       description,
+      type,
       category,
       tags,
       price,
@@ -902,7 +904,7 @@ app.post("/api/mint-exclusive", requireAuth, async (req, res) => {
   }
 });
 
-const getExclusivePurchases = async (userAddress, fromBlock = 0) => {
+const getExclusivePurchases = async (userAddress) => {
   try {
     const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
 
@@ -912,79 +914,77 @@ const getExclusivePurchases = async (userAddress, fromBlock = 0) => {
       provider
     );
 
-    const currentBlock = await provider.getBlockNumber();
-    const toBlock = currentBlock;
-
     const filter = exclusiveContract.filters.ExclusivePurchased(userAddress);
-    const events = await exclusiveContract.queryFilter(
-      filter,
-      Math.max(fromBlock, currentBlock),
-      toBlock
-    );
+    const events = await exclusiveContract.queryFilter(filter);
 
     const purchases = [];
 
     for(const event of events) {
       const { buyer, id, price } = event.args;
 
-      const block = await this.provider.getBlock(event.blockNumber);
-
       const asset = await Asset.findOne({
         tokenId: id
       });
 
+      const blockInfo = await provider.send('eth_getBlockByNumber', [
+        `0x${event.blockNumber.toString(16)}`, // Convert to hex
+        false // Don't include transactions
+      ]);
+      const purchaseDate = new Date(parseInt(blockInfo.timestamp, 16) * 1000);      
+
       purchases.push({
         asset,
-        purchaseDate: new Date(block.timestamp * 1000),
+        purchaseDate,
         licenseType: 'Exclusive',
-        price: price.toString()
+        price: ethers.formatEther(price)
       })
     }
+
+    return purchases;
   } catch (error) {
-    
+    console.error(`Exclusive Error:`, error)
   }
 }
 
-const getStandardPurchases = async (userAddress, fromBlock = 0) => {
+const getStandardPurchases = async (userAddress) => {
   try {
     const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
 
     const standardContract = new ethers.Contract(
-      process.env.NEXT_PUBLIC_ERC1155_ADDRESSS || '',
+      process.env.NEXT_PUBLIC_ERC1155_ADDRESS || '',
       STANDARD_LICENSE_1155,
       provider
     );
 
-    const currentBlock = await provider.getBlockNumber();
-    const toBlock = currentBlock;
-
     const filter = standardContract.filters.AssetPurchased(userAddress);
-    const events = await standardContract.queryFilter(
-      filter,
-      Math.max(fromBlock, currentBlock),
-      toBlock
-    );
+    const events = await standardContract.queryFilter(filter);
 
     const purchases = [];
 
     for(const event of events) {
       const { buyer, id, price } = event.args;
 
-      const block = await this.provider.getBlock(event.blockNumber);
-
       const asset = await Asset.findOne({
         tokenId: id
       });
 
+      const blockInfo = await provider.send('eth_getBlockByNumber', [
+        `0x${event.blockNumber.toString(16)}`, // Convert to hex
+        false // Don't include transactions
+      ]);
+      const purchaseDate = new Date(parseInt(blockInfo.timestamp, 16) * 1000);
+
       purchases.push({
         asset,
-        purchaseDate: new Date(block.timestamp * 1000),
+        purchaseDate,
         licenseType: 'Standard',
-        price: price.toString()
+        price: ethers.formatEther(price)
       })
     }
+
+    return purchases;
   } catch (error) {
-    
+    console.error(`Standard Error:`, error);
   }
 }
 
@@ -992,16 +992,19 @@ app.get('/api/purchases', requireAuth, async (req, res) => {
   try {
     const userAddress = req.user.wallet;
 
+    console.log("User Address:", userAddress);
+
     const [exclusivePurchases, standardPurchases] = await Promise.all([
       getExclusivePurchases(userAddress),
       getStandardPurchases(userAddress)
     ]);
 
-    const allPurchases = [...exclusivePurchases, ...standardPurchases];
+    const allPurchases = [...(Array.isArray(exclusivePurchases) ? exclusivePurchases : []), ...(Array.isArray(standardPurchases) ? standardPurchases : [])];
 
     allPurchases.sort((a, b) => b.purchaseDate.getTime() - a.purchaseDate.getTime());
 
-    return { assets: allPurchases };
+    // return { assets: allPurchases };
+    res.status(200).json({ assets: allPurchases });
   } catch (error) {
     console.error("Error fetching purchases:", error);
     res.status(500).json({ error: "Failed to fetch purchases" });
@@ -1045,5 +1048,5 @@ io.on("connection", (socket) => {
 // ─── HEALTHCHECK & START ──────────────────────────────────────────────────────
 app.get("/", (req, res) => res.send("🔥 ProofOfWork API is live!"));
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3066;
 server.listen(PORT, () => console.log(`🌐 Listening on port ${PORT}`));
