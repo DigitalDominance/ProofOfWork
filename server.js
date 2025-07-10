@@ -696,7 +696,7 @@ app.post("/api/assets", requireAuth, async (req, res) => {
       req.body;
 
     // Validate input
-    if (!title || !description || !category || !price || !license || !fileCid || !metadataCid || !metadataUri || !transactionHash || !fileSize || !mimeType) {
+    if (!title || !description || !category || !price || !license || !fileCid || !metadataCid || !metadataUri || !transactionHash || !fileSize || !mimeType || !type) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
@@ -1002,6 +1002,7 @@ app.get('/api/purchases', requireAuth, async (req, res) => {
     const allPurchases = [...(Array.isArray(exclusivePurchases) ? exclusivePurchases : []), ...(Array.isArray(standardPurchases) ? standardPurchases : [])];
 
     allPurchases.sort((a, b) => b.purchaseDate.getTime() - a.purchaseDate.getTime());
+    allPurchases = allPurchases.filter((purchase) => purchase.asset !== null);
 
     // return { assets: allPurchases };
     res.status(200).json({ assets: allPurchases });
