@@ -67,7 +67,12 @@ app.use(limiter);
 // ─── MONGODB CONNECTION ────────────────────────────────────────────────────────
 mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 mongoose.connection.on("error", err => console.error("MongoDB error:", err));
-mongoose.connection.once("open", () => console.log("✅ MongoDB connected"));
+mongoose.connection.once("open", () => {
+  console.log("✅ MongoDB connected");
+  startPostConnectTasks();
+});
+
+
 
 const userSchema = new mongoose.Schema({
   wallet: { type: String, unique: true, required: true },
@@ -168,6 +173,40 @@ const assetSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now },
 });
 const Asset = mongoose.model("Asset", assetSchema);
+
+// ─── PERIODIC WALLET NORMALIZATION ────────────────────────────────────────────
+async function lowercaseWallets() {
+  try {
+    const users = await POWUser.find();
+    let bulkOps = [];
+
+    for (const user of users) {
+      const lower = user.wallet.toLowerCase();
+      if (user.wallet !== lower) {
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: user._id },
+            update: { $set: { wallet: lower } }
+          }
+        });
+      }
+    }
+
+    if (bulkOps.length > 0) {
+      const result = await POWUser.bulkWrite(bulkOps);
+      console.log(`🔧 Lowercased ${result.modifiedCount} wallet(s).`);
+    } else {
+      console.log("✅ All wallets are already lowercase.");
+    }
+  } catch (err) {
+    console.error("❌ Error lowercasing wallets:", err);
+  }
+}
+
+function startPostConnectTasks() {
+  lowercaseWallets(); // Run once at startup
+  setInterval(lowercaseWallets, 6 * 60 * 60 * 1000); // Every 6 hours
+}
 
 // ─── AUTH HELPERS ──────────────────────────────────────────────────────────────
 const challenges = new Map();
