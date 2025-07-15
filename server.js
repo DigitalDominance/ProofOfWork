@@ -69,13 +69,21 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
 mongoose.connection.on("error", err => console.error("MongoDB error:", err));
 mongoose.connection.once("open", () => console.log("✅ MongoDB connected"));
 
-// ─── MONGOOSE MODELS ────────────────────────────────────────────────────────────
 const userSchema = new mongoose.Schema({
   wallet: { type: String, unique: true, required: true },
   displayName: { type: String, required: true, immutable: true },
   role: { type: String, enum: ["employer", "worker"], required: true },
   createdAt: { type: Date, default: Date.now },
 });
+
+// ─── ENFORCE LOWERCASE WALLET ON SAVE ─────────────────────────────────────────
+userSchema.pre("save", function (next) {
+  if (this.wallet) {
+    this.wallet = this.wallet.toLowerCase();
+  }
+  next();
+});
+
 const POWUser = mongoose.model("POWUser", userSchema);
 
 const jobSchema = new mongoose.Schema({
