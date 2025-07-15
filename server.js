@@ -179,19 +179,20 @@ app.post("/api/auth/verify", async (req, res) => {
     if (!wallet || !signature)
       return res.status(400).json({ error: "Missing wallet or signature" });
 
-    const record = challenges.get(wallet.toLowerCase());
+    const normalizedWallet = wallet.toLowerCase();
+    const record = challenges.get(normalizedWallet);
     if (!record || record.expires < Date.now())
       return res.status(401).json({ error: "Challenge expired" });
 
     const signer = ethers.verifyMessage(record.challenge, signature);
-    if (signer.toLowerCase() !== wallet.toLowerCase())
+    if (signer.toLowerCase() !== normalizedWallet)
       throw new Error("Invalid signature");
 
-    let user = await POWUser.findOne({ wallet });
+    let user = await POWUser.findOne({ wallet: { $regex: `^${normalizedWallet}$`, $options: "i" } });
     if (!user) {
       if (!displayName || !role)
         return res.status(400).json({ error: "displayName and role required" });
-      user = await POWUser.create({ wallet, displayName, role });
+      user = await POWUser.create({ wallet: normalizedWallet, displayName, role });
     }
 
     const accessToken = jwt.sign(
@@ -245,12 +246,14 @@ function requireAuth(req, res, next) {
 
 // ─── USER ENDPOINTS ────────────────────────────────────────────────────────────
 app.get("/api/users/:wallet", async (req, res) => {
-  const user = await POWUser.findOne({ wallet: req.params.wallet });
+  const wallet = req.params.wallet.toLowerCase(); // Normalize to lowercase for consistency
+  const user = await POWUser.findOne({ wallet: { $regex: `^${wallet}$`, $options: "i" } }); // Case-insensitive query
   if (!user) return res.status(404).json({ error: "Not found" });
   res.json(user);
 });
 app.head("/api/users/:wallet", async (req, res) => {
-  const exists = await POWUser.exists({ wallet: req.params.wallet });
+  const wallet = req.params.wallet.toLowerCase(); // Normalize to lowercase for consistency
+  const exists = await POWUser.exists({ wallet: { $regex: `^${wallet}$`, $options: "i" } }); // Case-insensitive query
   res.sendStatus(exists ? 200 : 404);
 });
 
@@ -268,7 +271,7 @@ app.post("/api/jobs", requireAuth, async (req, res) => {
     jobName,
     jobDescription,
     jobTags: jobTags || [],
-    employerAddress: req.user.wallet
+    employerAddress: req.user.wallet.toLowerCase()
   });
   res.status(201).json(job);
 });
@@ -278,13 +281,13 @@ app.put("/api/jobs/:jobId", requireAuth, async (req, res) => {
   if (!job) return res.status(404).json({ error: "Job not found" });
 
   if (req.body.employeeAddress) {
-    if (req.user.role !== "employer" || job.employerAddress !== req.user.wallet)
+    if (req.user.role !== "employer" || job.employerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
       return res.status(403).json({ error: "Not authorized to assign" });
-    job.employeeAddress = req.body.employeeAddress;
+    job.employeeAddress = req.body.employeeAddress.toLowerCase();
     job.status = "IN_PROGRESS";
   }
   if (req.body.finish === true) {
-    if (req.user.role !== "worker" || job.employeeAddress !== req.user.wallet)
+    if (req.user.role !== "worker" || job.employeeAddress.toLowerCase() !== req.user.wallet.toLowerCase())
       return res.status(403).json({ error: "Not authorized to finish" });
     job.status = "FINISHED";
   }
@@ -305,7 +308,7 @@ app.get("/api/jobs/:jobId", async (req, res) => {
 app.delete("/api/jobs/:jobId", requireAuth, async (req, res) => {
   const job = await POWJob.findById(req.params.jobId);
   if (!job) return res.status(404).json({ error: "Job not found" });
-  if (req.user.role !== "employer" || job.employerAddress !== req.user.wallet)
+  if (req.user.role !== "employer" || job.employerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
     return res.status(403).json({ error: "Not authorized to delete" });
   await job.deleteOne();
   res.sendStatus(204);
@@ -313,11 +316,12 @@ app.delete("/api/jobs/:jobId", requireAuth, async (req, res) => {
 
 // ─── TASK ENDPOINTS ────────────────────────────────────────────────────────────
 app.post("/api/tasks", requireAuth, async (req, res) => {
+  console.log('User', req.user)
   if (req.user.role !== "worker")
     return res.status(403).json({ error: "Only workers can create tasks" });
 
   const activeCount = await POWTask.countDocuments({
-    workerAddress: req.user.wallet,
+    workerAddress: { $regex: `^${req.user.wallet.toLowerCase()}$`, $options: "i" } ,
     status: { $in: ["OPEN", "OFFERED"] }
   });
 
@@ -336,7 +340,7 @@ app.post("/api/tasks", requireAuth, async (req, res) => {
     kasAmount,
     paymentType,
     duration,
-    workerAddress: req.user.wallet
+    workerAddress: req.user.wallet.toLowerCase()
   });
 
   res.status(201).json(task);
@@ -354,7 +358,7 @@ app.get("/api/tasks/:taskId", async (req, res) => {
 app.delete("/api/tasks/:taskId", requireAuth, async (req, res) => {
   const task = await POWTask.findById(req.params.taskId);
   if (!task) return res.status(404).json({ error: "Task not found" });
-  if (req.user.role !== "worker" || task.workerAddress !== req.user.wallet)
+  if (req.user.role !== "worker" || task.workerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
     return res.status(403).json({ error: "Not authorized to delete" });
   await task.deleteOne();
   res.sendStatus(204);
@@ -375,8 +379,8 @@ app.post("/api/tasks/:taskId/offers", requireAuth, async (req, res) => {
 
   const offer = await POWOffer.create({
     task: task._id,
-    employerAddress: req.user.wallet,
-    workerAddress: task.workerAddress,
+    employerAddress: req.user.wallet.toLowerCase(),
+    workerAddress: task.workerAddress.toLowerCase(),
     kasAmount,
     paymentType,
     duration,
@@ -391,7 +395,7 @@ app.post("/api/tasks/:taskId/offers", requireAuth, async (req, res) => {
 app.post("/api/offers/:offerId/job", requireAuth, async (req, res) => {
   const offer = await POWOffer.findById(req.params.offerId).populate("task");
   if (!offer) return res.status(404).json({ error: "Offer not found" });
-  if (offer.employerAddress !== req.user.wallet)
+  if (offer.employerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
     return res.status(403).json({ error: "Not authorized to convert this offer" });
   if (offer.status !== "PENDING")
     return res.status(400).json({ error: "Offer cannot be converted" });
@@ -405,7 +409,7 @@ app.post("/api/offers/:offerId/job", requireAuth, async (req, res) => {
     jobName: offer.task.taskName,
     jobDescription: offer.task.taskDescription,
     jobTags: offer.task.taskTags,
-    employerAddress: req.user.wallet
+    employerAddress: req.user.wallet.toLowerCase()
   });
 
   offer.status = "DECLINED";
@@ -424,8 +428,8 @@ app.get("/api/offers", requireAuth, async (req, res) => {
   }
 
   const filter = {};
-  if (employerAddress) filter.employerAddress = employerAddress;
-  if (workerAddress) filter.workerAddress = workerAddress;
+  if (employerAddress) filter.employerAddress = { $regex: `^${employerAddress}$`, $options: "i" };;
+  if (workerAddress) filter.workerAddress = { $regex: `^${workerAddress}$`, $options: "i" };
 
   try {
     const offers = await POWOffer
@@ -443,7 +447,7 @@ app.post("/api/offers/:offerId/accept", requireAuth, async (req, res) => {
   try {
     const offer = await POWOffer.findById(req.params.offerId).populate("task");
     if (!offer) return res.status(404).json({ error: "Offer not found" });
-    if (offer.workerAddress !== req.user.wallet)
+    if (offer.workerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
       return res.status(403).json({ error: "Not authorized to accept this offer" });
     if (offer.status !== "PENDING")
       return res.status(400).json({ error: "Offer cannot be accepted" });
@@ -457,8 +461,8 @@ app.post("/api/offers/:offerId/accept", requireAuth, async (req, res) => {
       jobName: offer.task.taskName,
       jobDescription: offer.task.taskDescription,
       jobTags: offer.task.taskTags,
-      employerAddress: offer.employerAddress,
-      employeeAddress: req.user.wallet,
+      employerAddress: offer.employerAddress.toLowerCase(),
+      employeeAddress: req.user.wallet.toLowerCase(),
       status: "IN_PROGRESS"
     });
 
@@ -501,7 +505,7 @@ app.delete("/api/offers/:offerId", requireAuth, async (req, res) => {
   try {
     const offer = await POWOffer.findById(req.params.offerId).populate("task");
     if (!offer) return res.status(404).json({ error: "Offer not found" });
-    if (offer.employerAddress !== req.user.wallet)
+    if (offer.employerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
       return res.status(403).json({ error: "Not authorized to cancel this offer" });
 
     if (offer.task.status === "OFFERED") {
@@ -526,7 +530,7 @@ app.post("/api/messages", requireAuth, async (req, res) => {
   try {
     const msg = await POWMessage.create({
       disputeId: Number(disputeId),
-      sender: req.user.wallet,
+      sender: req.user.wallet.toLowerCase(),
       content,
     });
     io.to(`dispute_${disputeId}`).emit("newMessage", msg);
@@ -554,11 +558,11 @@ app.post("/api/chat/messages", requireAuth, async (req, res) => {
   if (!to || !content) return res.status(400).json({ error: "Missing fields: to and content required" });
 
   try {
-    const participants = [from, to].sort();
+    const participants = [from.toLowerCase(), to.toLowerCase()].sort();
     const chatMsg = await POWChatMessage.create({
       participants,
-      sender: from,
-      receiver: to,
+      sender: from.toLowerCase(),
+      receiver: to.toLowerCase(),
       content,
     });
     const room = `chat_${participants.join("_")}`;
@@ -575,7 +579,7 @@ app.get("/api/chat/messages/:peer", requireAuth, async (req, res) => {
   const user = req.user.wallet;
   const page = parseInt(req.query.page, 10) || 1;
   const limit = parseInt(req.query.limit, 10) || 50;
-  const participants = [user, peer].sort();
+  const participants = [user.toLowerCase(), peer.toLowerCase()].sort();
 
   const msgs = await POWChatMessage.find({ participants })
     .sort({ createdAt: 1 })
