@@ -205,7 +205,6 @@ async function lowercaseWallets() {
 
 function startPostConnectTasks() {
   lowercaseWallets(); // Run once at startup
-  setInterval(lowercaseWallets, 6 * 60 * 60 * 1000); // Every 6 hours
 }
 
 // ─── AUTH HELPERS ──────────────────────────────────────────────────────────────
