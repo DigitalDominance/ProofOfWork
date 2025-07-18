@@ -72,7 +72,7 @@ mongoose.connection.once("open", () => {
 // ─── UPDATED USER SCHEMA WITH USERNAME AND PROFILE IMAGE TRACKING ─────────────
 const userSchema = new mongoose.Schema({
   wallet: { type: String, unique: true, required: true },
-  displayName: { type: String, required: true, immutable: true },
+  displayName: { type: String, required: true },
   profileImageCid: { type: String, default: null },
   lastProfileImageChange: { type: Date, default: null },
   role: { type: String, enum: ["employer", "worker"], required: true },
@@ -397,6 +397,41 @@ app.put("/api/users/profile-image", requireAuth, profileImageUpload.single("prof
       return res.status(400).json({ error: error.message })
     }
     res.status(500).json({ error: "Failed to update profile image" })
+  }
+})
+
+// ─── DISPLAY NAME UPDATE ENDPOINT ─────────────────────────────────────────────
+app.put("/api/users/display-name", requireAuth, async (req, res) => {
+  try {
+    const { displayName } = req.body
+
+    if (!displayName || displayName.trim().length === 0) {
+      return res.status(400).json({ error: "Display name is required" })
+    }
+
+    if (displayName.length > 50) {
+      return res.status(400).json({ error: "Display name must be 50 characters or less" })
+    }
+
+    const user = await POWUser.findOne({
+      wallet: { $regex: `^${req.user.wallet.toLowerCase()}$`, $options: "i" },
+    })
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" })
+    }
+
+    // Update display name
+    user.displayName = displayName.trim()
+    await user.save()
+
+    res.json({
+      message: "Display name updated successfully",
+      displayName: user.displayName,
+    })
+  } catch (error) {
+    console.error("Display name update error:", error)
+    res.status(500).json({ error: "Failed to update display name" })
   }
 })
 
