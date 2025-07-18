@@ -1,95 +1,95 @@
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const http = require("http");
-const { Server } = require("socket.io");
-const mongoose = require("mongoose");
-const jwt = require("jsonwebtoken");
-const { ethers } = require("ethers");
-const rateLimit = require("express-rate-limit");
-
+require("dotenv").config()
+const express = require("express")
+const cors = require("cors")
+const http = require("http")
+const { Server } = require("socket.io")
+const mongoose = require("mongoose")
+const jwt = require("jsonwebtoken")
+const { ethers } = require("ethers")
+const rateLimit = require("express-rate-limit")
 // Add Pinata SDK, multer, and stream utilities for uploads
-const { PinataSDK } = require("pinata");
-const multer = require("multer");
-const { Readable } = require("stream");
-const { Blob } = require("buffer");
+const { PinataSDK } = require("pinata")
+const multer = require("multer")
+const { Readable } = require("stream")
+const { Blob } = require("buffer")
 
-const app = express();
-const server = http.createServer(app);
-
-const STANDARD_LICENSE_1155 = require("./abis/StandardLicense1155.json");
-const EXCLUSIVE_LICENSE_721 = require("./abis/ExclusiveLicense721.json");
-const { AbiCoder } = require("ethers");
+const app = express()
+const server = http.createServer(app)
+const STANDARD_LICENSE_1155 = require("./abis/StandardLicense1155.json")
+const EXCLUSIVE_LICENSE_721 = require("./abis/ExclusiveLicense721.json")
+const { AbiCoder } = require("ethers")
 
 // ─── CORS CONFIGURATION ────────────────────────────────────────────────────────
 // Allow https://www.proofofworks.com (and its subdomains) plus localhost for dev
-const allowedOrigins = [
-  /^https:\/\/([a-zA-Z0-9-]+\.)?proofofworks\.com$/,
-  /^http:\/\/localhost(:\d+)?$/,
-];
+const allowedOrigins = [/^https:\/\/([a-zA-Z0-9-]+\.)?proofofworks\.com$/, /^http:\/\/localhost(:\d+)?$/]
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.some(rx => rx.test(origin))) {
-      return callback(null, true);
-    }
-    return callback(new Error("Not allowed by CORS"), false);
-  },
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true)
+      if (allowedOrigins.some((rx) => rx.test(origin))) {
+        return callback(null, true)
+      }
+      return callback(new Error("Not allowed by CORS"), false)
+    },
+    credentials: true,
+  }),
+)
 
 // Socket.IO CORS
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.some(rx => rx.test(origin))) {
-        return callback(null, true);
+      if (!origin) return callback(null, true)
+      if (allowedOrigins.some((rx) => rx.test(origin))) {
+        return callback(null, true)
       }
-      return callback(new Error("Not allowed by CORS"), false);
+      return callback(new Error("Not allowed by CORS"), false)
     },
     methods: ["GET", "POST"],
-    credentials: true
-  }
-});
+    credentials: true,
+  },
+})
 
 // ─── BASIC MIDDLEWARES ─────────────────────────────────────────────────────────
-app.use(express.json());
+app.use(express.json())
 
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60_000,
-  max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 60,
-  keyGenerator: req => req.user?.wallet || req.ip,
-});
-app.use(limiter);
+  windowMs: Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60_000,
+  max: Number.parseInt(process.env.RATE_LIMIT_MAX, 10) || 60,
+  keyGenerator: (req) => req.user?.wallet || req.ip,
+})
+app.use(limiter)
 
 // ─── MONGODB CONNECTION ────────────────────────────────────────────────────────
-mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-mongoose.connection.on("error", err => console.error("MongoDB error:", err));
+mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+mongoose.connection.on("error", (err) => console.error("MongoDB error:", err))
 mongoose.connection.once("open", () => {
-  console.log("✅ MongoDB connected");
-  startPostConnectTasks();
-});
+  console.log("✅ MongoDB connected")
+  startPostConnectTasks()
+})
 
-
-
+// ─── UPDATED USER SCHEMA WITH USERNAME AND PROFILE IMAGE TRACKING ─────────────
 const userSchema = new mongoose.Schema({
   wallet: { type: String, unique: true, required: true },
   displayName: { type: String, required: true, immutable: true },
+  username: { type: String, default: null, unique: true, sparse: true }, // Add unique and sparse
+  profileImageCid: { type: String, default: null },
+  lastUsernameChange: { type: Date, default: null },
+  lastProfileImageChange: { type: Date, default: null },
   role: { type: String, enum: ["employer", "worker"], required: true },
   createdAt: { type: Date, default: Date.now },
-});
+})
 
 // ─── ENFORCE LOWERCASE WALLET ON SAVE ─────────────────────────────────────────
 userSchema.pre("save", function (next) {
   if (this.wallet) {
-    this.wallet = this.wallet.toLowerCase();
+    this.wallet = this.wallet.toLowerCase()
   }
-  next();
-});
+  next()
+})
 
-const POWUser = mongoose.model("POWUser", userSchema);
+const POWUser = mongoose.model("POWUser", userSchema)
 
 const jobSchema = new mongoose.Schema({
   paymentType: { type: String, enum: ["WEEKLY", "ONE_OFF"], required: true },
@@ -100,8 +100,9 @@ const jobSchema = new mongoose.Schema({
   employeeAddress: { type: String, default: null },
   status: { type: String, enum: ["OPEN", "IN_PROGRESS", "FINISHED"], default: "OPEN" },
   createdAt: { type: Date, default: Date.now },
-});
-const POWJob = mongoose.model("POWJob", jobSchema);
+})
+
+const POWJob = mongoose.model("POWJob", jobSchema)
 
 const taskSchema = new mongoose.Schema({
   taskName: { type: String, required: true },
@@ -113,8 +114,9 @@ const taskSchema = new mongoose.Schema({
   duration: { type: String },
   status: { type: String, enum: ["OPEN", "OFFERED", "CONVERTED"], default: "OPEN" },
   createdAt: { type: Date, default: Date.now },
-});
-const POWTask = mongoose.model("POWTask", taskSchema);
+})
+
+const POWTask = mongoose.model("POWTask", taskSchema)
 
 const offerSchema = new mongoose.Schema({
   task: { type: mongoose.Schema.Types.ObjectId, ref: "POWTask", required: true },
@@ -125,20 +127,20 @@ const offerSchema = new mongoose.Schema({
   paymentType: { type: String, enum: ["weekly", "oneoff"] },
   duration: { type: String },
   createdAt: { type: Date, default: Date.now },
-});
-const POWOffer = mongoose.model("POWOffer", offerSchema);
+})
+
+const POWOffer = mongoose.model("POWOffer", offerSchema)
 
 const messageSchema = new mongoose.Schema({
   disputeId: { type: Number, required: true, index: true },
   sender: { type: String, required: true },
   content: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
-});
-messageSchema.index(
-  { createdAt: 1 },
-  { expireAfterSeconds: 14 * 24 * 3600 }
-);
-const POWMessage = mongoose.model("POWMessage", messageSchema);
+})
+
+messageSchema.index({ createdAt: 1 }, { expireAfterSeconds: 14 * 24 * 3600 })
+
+const POWMessage = mongoose.model("POWMessage", messageSchema)
 
 const chatSchema = new mongoose.Schema({
   participants: { type: [String], required: true, index: true },
@@ -146,8 +148,9 @@ const chatSchema = new mongoose.Schema({
   receiver: { type: String, required: true },
   content: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
-});
-const POWChatMessage = mongoose.model("POWChatMessage", chatSchema);
+})
+
+const POWChatMessage = mongoose.model("POWChatMessage", chatSchema)
 
 // ─── ASSET MODEL (for marketplace) ─────────────────────────────────────────────
 const assetSchema = new mongoose.Schema({
@@ -171,213 +174,419 @@ const assetSchema = new mongoose.Schema({
   reviewCount: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
-});
-const Asset = mongoose.model("Asset", assetSchema);
+})
+
+const Asset = mongoose.model("Asset", assetSchema)
 
 // ─── PERIODIC WALLET NORMALIZATION ────────────────────────────────────────────
 async function lowercaseWallets() {
   try {
-    const users = await POWUser.find();
-    let bulkOps = [];
-
+    const users = await POWUser.find()
+    const bulkOps = []
     for (const user of users) {
-      const lower = user.wallet.toLowerCase();
+      const lower = user.wallet.toLowerCase()
       if (user.wallet !== lower) {
         bulkOps.push({
           updateOne: {
             filter: { _id: user._id },
-            update: { $set: { wallet: lower } }
-          }
-        });
+            update: { $set: { wallet: lower } },
+          },
+        })
       }
     }
-
     if (bulkOps.length > 0) {
-      const result = await POWUser.bulkWrite(bulkOps);
-      console.log(`🔧 Lowercased ${result.modifiedCount} wallet(s).`);
+      const result = await POWUser.bulkWrite(bulkOps)
+      console.log(`🔧 Lowercased ${result.modifiedCount} wallet(s).`)
     } else {
-      console.log("✅ All wallets are already lowercase.");
+      console.log("✅ All wallets are already lowercase.")
     }
   } catch (err) {
-    console.error("❌ Error lowercasing wallets:", err);
+    console.error("❌ Error lowercasing wallets:", err)
   }
 }
 
 function startPostConnectTasks() {
-  lowercaseWallets(); // Run once at startup
+  lowercaseWallets() // Run once at startup
 }
 
 // ─── AUTH HELPERS ──────────────────────────────────────────────────────────────
-const challenges = new Map();
+const challenges = new Map()
 
 app.post("/api/auth/challenge", (req, res) => {
-  const { wallet } = req.body;
-  if (!wallet) return res.status(400).json({ error: "Wallet required" });
-  const challenge = `ProofOfWork login: ${Date.now()}|${Math.random()}`;
-  const expires = Date.now() + (parseInt(process.env.CHALLENGE_EXPIRY_MIN, 10) || 10) * 60_000;
-  challenges.set(wallet.toLowerCase(), { challenge, expires });
-  res.json({ challenge });
-});
+  const { wallet } = req.body
+  if (!wallet) return res.status(400).json({ error: "Wallet required" })
+  const challenge = `ProofOfWork login: ${Date.now()}|${Math.random()}`
+  const expires = Date.now() + (Number.parseInt(process.env.CHALLENGE_EXPIRY_MIN, 10) || 10) * 60_000
+  challenges.set(wallet.toLowerCase(), { challenge, expires })
+  res.json({ challenge })
+})
 
 app.post("/api/auth/verify", async (req, res) => {
   try {
-    const { wallet, signature, displayName, role } = req.body;
-    if (!wallet || !signature)
-      return res.status(400).json({ error: "Missing wallet or signature" });
+    const { wallet, signature, displayName, role, username } = req.body // Add username
+    if (!wallet || !signature) return res.status(400).json({ error: "Missing wallet or signature" })
 
-    const normalizedWallet = wallet.toLowerCase();
-    const record = challenges.get(normalizedWallet);
-    if (!record || record.expires < Date.now())
-      return res.status(401).json({ error: "Challenge expired" });
+    const normalizedWallet = wallet.toLowerCase()
+    const record = challenges.get(normalizedWallet)
+    if (!record || record.expires < Date.now()) return res.status(401).json({ error: "Challenge expired" })
 
-    const signer = ethers.verifyMessage(record.challenge, signature);
-    if (signer.toLowerCase() !== normalizedWallet)
-      throw new Error("Invalid signature");
+    const signer = ethers.verifyMessage(record.challenge, signature)
+    if (signer.toLowerCase() !== normalizedWallet) throw new Error("Invalid signature")
 
-    let user = await POWUser.findOne({ wallet: { $regex: `^${normalizedWallet}$`, $options: "i" } });
+    let user = await POWUser.findOne({ wallet: { $regex: `^${normalizedWallet}$`, $options: "i" } })
     if (!user) {
-      if (!displayName || !role)
-        return res.status(400).json({ error: "displayName and role required" });
-      user = await POWUser.create({ wallet: normalizedWallet, displayName, role });
+      if (!displayName || !role) return res.status(400).json({ error: "displayName and role required" })
+
+      // Check username uniqueness if provided
+      if (username) {
+        const existingUsername = await POWUser.findOne({
+          username: { $regex: `^${username.trim()}$`, $options: "i" },
+        })
+        if (existingUsername) {
+          return res.status(409).json({ error: "Username is already taken" })
+        }
+      }
+
+      user = await POWUser.create({
+        wallet: normalizedWallet,
+        displayName,
+        role,
+        username: username ? username.trim() : null,
+        lastUsernameChange: username ? new Date() : null,
+      })
     }
 
-    const accessToken = jwt.sign(
-      { wallet, role: user.role },
-      process.env.JWT_ACCESS_SECRET,
-      { expiresIn: "15m" }
-    );
-    const refreshToken = jwt.sign(
-      { wallet, role: user.role },
-      process.env.JWT_REFRESH_SECRET,
-      { expiresIn: "7d" }
-    );
+    const accessToken = jwt.sign({ wallet, role: user.role }, process.env.JWT_ACCESS_SECRET, { expiresIn: "15m" })
+    const refreshToken = jwt.sign({ wallet, role: user.role }, process.env.JWT_REFRESH_SECRET, { expiresIn: "7d" })
 
-    res.json({ accessToken, refreshToken });
+    res.json({ accessToken, refreshToken })
   } catch (e) {
-    console.error("Auth error:", e);
-    res.status(401).json({ error: "Auth failed", details: e.message });
+    console.error("Auth error:", e)
+    if (e.code === 11000 && e.keyPattern?.username) {
+      return res.status(409).json({ error: "Username is already taken" })
+    }
+    res.status(401).json({ error: "Auth failed", details: e.message })
   }
-});
+})
 
 app.post("/api/auth/refresh", (req, res) => {
-  const { refreshToken } = req.body;
-  if (!refreshToken)
-    return res.status(400).json({ error: "Refresh token required" });
+  const { refreshToken } = req.body
+  if (!refreshToken) return res.status(400).json({ error: "Refresh token required" })
+
   try {
-    const payload = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
-    const newAccessToken = jwt.sign(
-      { wallet: payload.wallet, role: payload.role },
-      process.env.JWT_ACCESS_SECRET,
-      { expiresIn: "15m" }
-    );
-    res.json({ accessToken: newAccessToken });
+    const payload = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET)
+    const newAccessToken = jwt.sign({ wallet: payload.wallet, role: payload.role }, process.env.JWT_ACCESS_SECRET, {
+      expiresIn: "15m",
+    })
+    res.json({ accessToken: newAccessToken })
   } catch (e) {
-    console.error("Refresh error:", e);
-    res.status(401).json({ error: "Invalid or expired refresh token" });
+    console.error("Refresh error:", e)
+    res.status(401).json({ error: "Invalid or expired refresh token" })
   }
-});
+})
 
 function requireAuth(req, res, next) {
-  const auth = req.headers.authorization?.split(" ");
-  if (auth?.[0] !== "Bearer" || !auth[1])
-    return res.status(401).json({ error: "Missing access token" });
+  const auth = req.headers.authorization?.split(" ")
+  if (auth?.[0] !== "Bearer" || !auth[1]) return res.status(401).json({ error: "Missing access token" })
+
   try {
-    const payload = jwt.verify(auth[1], process.env.JWT_ACCESS_SECRET);
-    req.user = payload;
-    next();
+    const payload = jwt.verify(auth[1], process.env.JWT_ACCESS_SECRET)
+    req.user = payload
+    next()
   } catch {
-    res.status(401).json({ error: "Invalid or expired access token" });
+    res.status(401).json({ error: "Invalid or expired access token" })
   }
 }
 
-// ─── USER ENDPOINTS ────────────────────────────────────────────────────────────
-app.get("/api/users/:wallet", async (req, res) => {
-  const wallet = req.params.wallet.toLowerCase(); // Normalize to lowercase for consistency
-  const user = await POWUser.findOne({ wallet: { $regex: `^${wallet}$`, $options: "i" } }); // Case-insensitive query
-  if (!user) return res.status(404).json({ error: "Not found" });
-  res.json(user);
-});
-app.head("/api/users/:wallet", async (req, res) => {
-  const wallet = req.params.wallet.toLowerCase(); // Normalize to lowercase for consistency
-  const exists = await POWUser.exists({ wallet: { $regex: `^${wallet}$`, $options: "i" } }); // Case-insensitive query
-  res.sendStatus(exists ? 200 : 404);
-});
+// ─── USERNAME AVAILABILITY CHECK ENDPOINT ─────────────────────────────────────
+app.get("/api/users/username/:username/available", async (req, res) => {
+  try {
+    const username = req.params.username.trim()
+
+    if (!username || username.length === 0) {
+      return res.status(400).json({ error: "Username is required" })
+    }
+
+    if (username.length > 50) {
+      return res.status(400).json({ error: "Username must be 50 characters or less" })
+    }
+
+    const existingUser = await POWUser.findOne({
+      username: { $regex: `^${username}$`, $options: "i" },
+    })
+
+    res.json({
+      available: !existingUser,
+      username: username,
+    })
+  } catch (error) {
+    console.error("Username availability check error:", error)
+    res.status(500).json({ error: "Failed to check username availability" })
+  }
+})
+
+// ─── UPDATED USER ENDPOINTS WITH PROFILE IMAGE AND USERNAME LOOKUP ────────────
+app.get("/api/users/:identifier", async (req, res) => {
+  try {
+    const identifier = req.params.identifier.toLowerCase()
+
+    // Try to find by wallet first, then by username
+    let user = await POWUser.findOne({ wallet: { $regex: `^${identifier}$`, $options: "i" } })
+
+    if (!user) {
+      // If not found by wallet, try by username
+      user = await POWUser.findOne({ username: { $regex: `^${identifier}$`, $options: "i" } })
+    }
+
+    if (!user) return res.status(404).json({ error: "User not found" })
+
+    // Include profile image URL if available
+    const userResponse = {
+      ...user.toObject(),
+      profileImageUrl: user.profileImageCid
+        ? `https://${process.env.PINATA_GATEWAY}/ipfs/${user.profileImageCid}`
+        : null,
+    }
+
+    res.json(userResponse)
+  } catch (error) {
+    console.error("User fetch error:", error)
+    res.status(500).json({ error: "Failed to fetch user" })
+  }
+})
+
+app.head("/api/users/:identifier", async (req, res) => {
+  try {
+    const identifier = req.params.identifier.toLowerCase()
+
+    // Check if user exists by wallet or username
+    let exists = await POWUser.exists({ wallet: { $regex: `^${identifier}$`, $options: "i" } })
+
+    if (!exists) {
+      exists = await POWUser.exists({ username: { $regex: `^${identifier}$`, $options: "i" } })
+    }
+
+    res.sendStatus(exists ? 200 : 404)
+  } catch (error) {
+    console.error("User exists check error:", error)
+    res.sendStatus(500)
+  }
+})
+
+// ─── NEW USERNAME UPDATE ENDPOINT ─────────────────────────────────────────────
+app.put("/api/users/username", requireAuth, async (req, res) => {
+  try {
+    const { username } = req.body
+
+    if (!username || username.trim().length === 0) {
+      return res.status(400).json({ error: "Username is required" })
+    }
+
+    if (username.length > 50) {
+      return res.status(400).json({ error: "Username must be 50 characters or less" })
+    }
+
+    const user = await POWUser.findOne({
+      wallet: { $regex: `^${req.user.wallet.toLowerCase()}$`, $options: "i" },
+    })
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" })
+    }
+
+    // Check if 30 days have passed since last username change
+    const now = new Date()
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+
+    if (user.lastUsernameChange && user.lastUsernameChange > thirtyDaysAgo) {
+      const nextAllowedChange = new Date(user.lastUsernameChange.getTime() + 30 * 24 * 60 * 60 * 1000)
+      return res.status(429).json({
+        error: "Username can only be changed once every 30 days",
+        nextAllowedChange: nextAllowedChange.toISOString(),
+      })
+    }
+
+    // Check if username is already taken by another user
+    const existingUser = await POWUser.findOne({
+      username: { $regex: `^${username.trim()}$`, $options: "i" },
+      wallet: { $ne: user.wallet },
+    })
+
+    if (existingUser) {
+      return res.status(409).json({ error: "Username is already taken" })
+    }
+
+    // Update username and timestamp
+    user.username = username.trim()
+    user.lastUsernameChange = now
+    await user.save()
+
+    res.json({
+      message: "Username updated successfully",
+      username: user.username,
+      nextAllowedChange: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+  } catch (error) {
+    console.error("Username update error:", error)
+    res.status(500).json({ error: "Failed to update username" })
+  }
+})
+
+// ─── NEW PROFILE IMAGE UPLOAD ENDPOINT ────────────────────────────────────────
+// Configure Pinata SDK
+const pinata = new PinataSDK({
+  pinataJwt: process.env.PINATA_JWT,
+  pinataGateway: process.env.PINATA_GATEWAY,
+})
+
+// Multer for profile image upload, limit 10 MB for profile images
+const profileImageUpload = multer({
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    // Only allow image files
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true)
+    } else {
+      cb(new Error("Only image files are allowed"), false)
+    }
+  },
+})
+
+app.put("/api/users/profile-image", requireAuth, profileImageUpload.single("profileImage"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "Profile image file is required" })
+    }
+
+    const user = await POWUser.findOne({
+      wallet: { $regex: `^${req.user.wallet.toLowerCase()}$`, $options: "i" },
+    })
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" })
+    }
+
+    // Check if 7 days have passed since last profile image change
+    const now = new Date()
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+
+    if (user.lastProfileImageChange && user.lastProfileImageChange > sevenDaysAgo) {
+      const nextAllowedChange = new Date(user.lastProfileImageChange.getTime() + 7 * 24 * 60 * 60 * 1000)
+      return res.status(429).json({
+        error: "Profile image can only be changed once every 7 days",
+        nextAllowedChange: nextAllowedChange.toISOString(),
+      })
+    }
+
+    const { originalname, mimetype, size, buffer } = req.file
+
+    // Upload to Pinata
+    const options = {
+      pinataMetadata: { name: `profile-${user.wallet}-${Date.now()}` },
+      pinataOptions: { cidVersion: 1 },
+    }
+
+    const blob = new Blob([buffer], { type: mimetype })
+    const uploadResult = await pinata.upload.public.file(blob, options)
+    const cid = uploadResult.cid
+
+    // Update user profile image and timestamp
+    user.profileImageCid = cid
+    user.lastProfileImageChange = now
+    await user.save()
+
+    const profileImageUrl = `https://${process.env.PINATA_GATEWAY}/ipfs/${cid}`
+
+    res.json({
+      message: "Profile image updated successfully",
+      profileImageCid: cid,
+      profileImageUrl: profileImageUrl,
+      nextAllowedChange: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+  } catch (error) {
+    console.error("Profile image update error:", error)
+    if (error.message === "Only image files are allowed") {
+      return res.status(400).json({ error: error.message })
+    }
+    res.status(500).json({ error: "Failed to update profile image" })
+  }
+})
 
 // ─── JOB ENDPOINTS ─────────────────────────────────────────────────────────────
 app.post("/api/jobs", requireAuth, async (req, res) => {
-  if (req.user.role !== "employer")
-    return res.status(403).json({ error: "Only employers can create jobs" });
+  if (req.user.role !== "employer") return res.status(403).json({ error: "Only employers can create jobs" })
 
-  const { paymentType, jobName, jobDescription, jobTags } = req.body;
-  if (!paymentType || !jobName || !jobDescription)
-    return res.status(400).json({ error: "Missing required fields" });
+  const { paymentType, jobName, jobDescription, jobTags } = req.body
+  if (!paymentType || !jobName || !jobDescription) return res.status(400).json({ error: "Missing required fields" })
 
   const job = await POWJob.create({
     paymentType,
     jobName,
     jobDescription,
     jobTags: jobTags || [],
-    employerAddress: req.user.wallet.toLowerCase()
-  });
-  res.status(201).json(job);
-});
+    employerAddress: req.user.wallet.toLowerCase(),
+  })
+
+  res.status(201).json(job)
+})
 
 app.put("/api/jobs/:jobId", requireAuth, async (req, res) => {
-  const job = await POWJob.findById(req.params.jobId);
-  if (!job) return res.status(404).json({ error: "Job not found" });
+  const job = await POWJob.findById(req.params.jobId)
+  if (!job) return res.status(404).json({ error: "Job not found" })
 
   if (req.body.employeeAddress) {
     if (req.user.role !== "employer" || job.employerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
-      return res.status(403).json({ error: "Not authorized to assign" });
-    job.employeeAddress = req.body.employeeAddress.toLowerCase();
-    job.status = "IN_PROGRESS";
+      return res.status(403).json({ error: "Not authorized to assign" })
+    job.employeeAddress = req.body.employeeAddress.toLowerCase()
+    job.status = "IN_PROGRESS"
   }
+
   if (req.body.finish === true) {
     if (req.user.role !== "worker" || job.employeeAddress.toLowerCase() !== req.user.wallet.toLowerCase())
-      return res.status(403).json({ error: "Not authorized to finish" });
-    job.status = "FINISHED";
+      return res.status(403).json({ error: "Not authorized to finish" })
+    job.status = "FINISHED"
   }
 
-  await job.save();
-  res.json(job);
-});
+  await job.save()
+  res.json(job)
+})
 
 app.get("/api/jobs", async (req, res) => {
-  const jobs = await POWJob.find();
-  res.json(jobs);
-});
+  const jobs = await POWJob.find()
+  res.json(jobs)
+})
+
 app.get("/api/jobs/:jobId", async (req, res) => {
-  const job = await POWJob.findById(req.params.jobId);
-  if (!job) return res.status(404).json({ error: "Not found" });
-  res.json(job);
-});
+  const job = await POWJob.findById(req.params.jobId)
+  if (!job) return res.status(404).json({ error: "Not found" })
+  res.json(job)
+})
+
 app.delete("/api/jobs/:jobId", requireAuth, async (req, res) => {
-  const job = await POWJob.findById(req.params.jobId);
-  if (!job) return res.status(404).json({ error: "Job not found" });
+  const job = await POWJob.findById(req.params.jobId)
+  if (!job) return res.status(404).json({ error: "Job not found" })
+
   if (req.user.role !== "employer" || job.employerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
-    return res.status(403).json({ error: "Not authorized to delete" });
-  await job.deleteOne();
-  res.sendStatus(204);
-});
+    return res.status(403).json({ error: "Not authorized to delete" })
+
+  await job.deleteOne()
+  res.sendStatus(204)
+})
 
 // ─── TASK ENDPOINTS ────────────────────────────────────────────────────────────
 app.post("/api/tasks", requireAuth, async (req, res) => {
-  console.log('User', req.user)
-  if (req.user.role !== "worker")
-    return res.status(403).json({ error: "Only workers can create tasks" });
+  console.log("User", req.user)
+  if (req.user.role !== "worker") return res.status(403).json({ error: "Only workers can create tasks" })
 
   const activeCount = await POWTask.countDocuments({
-    workerAddress: { $regex: `^${req.user.wallet.toLowerCase()}$`, $options: "i" } ,
-    status: { $in: ["OPEN", "OFFERED"] }
-  });
+    workerAddress: { $regex: `^${req.user.wallet.toLowerCase()}$`, $options: "i" },
+    status: { $in: ["OPEN", "OFFERED"] },
+  })
 
-  if (activeCount >= 3)
-    return res.status(400).json({ error: "Cannot have more than 3 active tasks" });
+  if (activeCount >= 3) return res.status(400).json({ error: "Cannot have more than 3 active tasks" })
 
-  const { taskName, taskDescription, taskTags, kasAmount, paymentType, duration } = req.body;
-
-  if (!taskName || !taskDescription)
-    return res.status(400).json({ error: "Missing required fields" });
+  const { taskName, taskDescription, taskTags, kasAmount, paymentType, duration } = req.body
+  if (!taskName || !taskDescription) return res.status(400).json({ error: "Missing required fields" })
 
   const task = await POWTask.create({
     taskName,
@@ -386,43 +595,44 @@ app.post("/api/tasks", requireAuth, async (req, res) => {
     kasAmount,
     paymentType,
     duration,
-    workerAddress: req.user.wallet.toLowerCase()
-  });
+    workerAddress: req.user.wallet.toLowerCase(),
+  })
 
-  res.status(201).json(task);
-});
+  res.status(201).json(task)
+})
 
 app.get("/api/tasks", async (req, res) => {
-  const tasks = await POWTask.find();
-  res.json(tasks);
-});
+  const tasks = await POWTask.find()
+  res.json(tasks)
+})
+
 app.get("/api/tasks/:taskId", async (req, res) => {
-  const task = await POWTask.findById(req.params.taskId);
-  if (!task) return res.status(404).json({ error: "Task not found" });
-  res.json(task);
-});
+  const task = await POWTask.findById(req.params.taskId)
+  if (!task) return res.status(404).json({ error: "Task not found" })
+  res.json(task)
+})
+
 app.delete("/api/tasks/:taskId", requireAuth, async (req, res) => {
-  const task = await POWTask.findById(req.params.taskId);
-  if (!task) return res.status(404).json({ error: "Task not found" });
+  const task = await POWTask.findById(req.params.taskId)
+  if (!task) return res.status(404).json({ error: "Task not found" })
+
   if (req.user.role !== "worker" || task.workerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
-    return res.status(403).json({ error: "Not authorized to delete" });
-  await task.deleteOne();
-  res.sendStatus(204);
-});
+    return res.status(403).json({ error: "Not authorized to delete" })
+
+  await task.deleteOne()
+  res.sendStatus(204)
+})
 
 // ─── OFFER ENDPOINTS ──────────────────────────────────────────────────────────
 app.post("/api/tasks/:taskId/offers", requireAuth, async (req, res) => {
-  if (req.user.role !== "employer")
-    return res.status(403).json({ error: "Only employers can make offers" });
+  if (req.user.role !== "employer") return res.status(403).json({ error: "Only employers can make offers" })
 
-  const task = await POWTask.findById(req.params.taskId);
-  if (!task) return res.status(404).json({ error: "Task not found" });
+  const task = await POWTask.findById(req.params.taskId)
+  if (!task) return res.status(404).json({ error: "Task not found" })
 
-  if (task.status !== "OPEN")
-    return res.status(400).json({ error: "Task is not open for offers" });
+  if (task.status !== "OPEN") return res.status(400).json({ error: "Task is not open for offers" })
 
-  const { kasAmount, paymentType, duration } = req.body;
-
+  const { kasAmount, paymentType, duration } = req.body
   const offer = await POWOffer.create({
     task: task._id,
     employerAddress: req.user.wallet.toLowerCase(),
@@ -430,77 +640,74 @@ app.post("/api/tasks/:taskId/offers", requireAuth, async (req, res) => {
     kasAmount,
     paymentType,
     duration,
-  });
+  })
 
-  task.status = "OFFERED";
-  await task.save();
+  task.status = "OFFERED"
+  await task.save()
 
-  res.status(201).json(offer);
-});
+  res.status(201).json(offer)
+})
 
 app.post("/api/offers/:offerId/job", requireAuth, async (req, res) => {
-  const offer = await POWOffer.findById(req.params.offerId).populate("task");
-  if (!offer) return res.status(404).json({ error: "Offer not found" });
-  if (offer.employerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
-    return res.status(403).json({ error: "Not authorized to convert this offer" });
-  if (offer.status !== "PENDING")
-    return res.status(400).json({ error: "Offer cannot be converted" });
+  const offer = await POWOffer.findById(req.params.offerId).populate("task")
+  if (!offer) return res.status(404).json({ error: "Offer not found" })
 
-  const { paymentType } = req.body;
-  if (!paymentType)
-    return res.status(400).json({ error: "paymentType required to create job" });
+  if (offer.employerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
+    return res.status(403).json({ error: "Not authorized to convert this offer" })
+
+  if (offer.status !== "PENDING") return res.status(400).json({ error: "Offer cannot be converted" })
+
+  const { paymentType } = req.body
+  if (!paymentType) return res.status(400).json({ error: "paymentType required to create job" })
 
   const job = await POWJob.create({
     paymentType,
     jobName: offer.task.taskName,
     jobDescription: offer.task.taskDescription,
     jobTags: offer.task.taskTags,
-    employerAddress: req.user.wallet.toLowerCase()
-  });
+    employerAddress: req.user.wallet.toLowerCase(),
+  })
 
-  offer.status = "DECLINED";
-  await offer.save();
+  offer.status = "DECLINED"
+  await offer.save()
 
-  offer.task.status = "CONVERTED";
-  await offer.task.save();
+  offer.task.status = "CONVERTED"
+  await offer.task.save()
 
-  res.status(201).json(job);
-});
+  res.status(201).json(job)
+})
 
 app.get("/api/offers", requireAuth, async (req, res) => {
-  const { employerAddress, workerAddress } = req.query;
+  const { employerAddress, workerAddress } = req.query
   if (!employerAddress && !workerAddress) {
-    return res.status(400).json({ error: "Provide employerAddress or workerAddress" });
+    return res.status(400).json({ error: "Provide employerAddress or workerAddress" })
   }
 
-  const filter = {};
-  if (employerAddress) filter.employerAddress = { $regex: `^${employerAddress}$`, $options: "i" };;
-  if (workerAddress) filter.workerAddress = { $regex: `^${workerAddress}$`, $options: "i" };
+  const filter = {}
+  if (employerAddress) filter.employerAddress = { $regex: `^${employerAddress}$`, $options: "i" }
+  if (workerAddress) filter.workerAddress = { $regex: `^${workerAddress}$`, $options: "i" }
 
   try {
-    const offers = await POWOffer
-      .find(filter)
-      .populate("task")
-      .sort({ createdAt: -1 });
-    res.json(offers);
+    const offers = await POWOffer.find(filter).populate("task").sort({ createdAt: -1 })
+
+    res.json(offers)
   } catch (e) {
-    console.error("Fetch offers error:", e);
-    res.status(500).json({ error: e.message });
+    console.error("Fetch offers error:", e)
+    res.status(500).json({ error: e.message })
   }
-});
+})
 
 app.post("/api/offers/:offerId/accept", requireAuth, async (req, res) => {
   try {
-    const offer = await POWOffer.findById(req.params.offerId).populate("task");
-    if (!offer) return res.status(404).json({ error: "Offer not found" });
-    if (offer.workerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
-      return res.status(403).json({ error: "Not authorized to accept this offer" });
-    if (offer.status !== "PENDING")
-      return res.status(400).json({ error: "Offer cannot be accepted" });
+    const offer = await POWOffer.findById(req.params.offerId).populate("task")
+    if (!offer) return res.status(404).json({ error: "Offer not found" })
 
-    const jobPaymentType = offer.paymentType === "oneoff"
-      ? "ONE_OFF"
-      : "WEEKLY";
+    if (offer.workerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
+      return res.status(403).json({ error: "Not authorized to accept this offer" })
+
+    if (offer.status !== "PENDING") return res.status(400).json({ error: "Offer cannot be accepted" })
+
+    const jobPaymentType = offer.paymentType === "oneoff" ? "ONE_OFF" : "WEEKLY"
 
     const job = await POWJob.create({
       paymentType: jobPaymentType,
@@ -509,199 +716,196 @@ app.post("/api/offers/:offerId/accept", requireAuth, async (req, res) => {
       jobTags: offer.task.taskTags,
       employerAddress: offer.employerAddress.toLowerCase(),
       employeeAddress: req.user.wallet.toLowerCase(),
-      status: "IN_PROGRESS"
-    });
+      status: "IN_PROGRESS",
+    })
 
-    offer.status = "ACCEPTED";
-    await offer.save();
+    offer.status = "ACCEPTED"
+    await offer.save()
 
-    offer.task.status = "CONVERTED";
-    await offer.task.save();
+    offer.task.status = "CONVERTED"
+    await offer.task.save()
 
-    res.status(201).json({ job, message: "Offer accepted and job created" });
+    res.status(201).json({ job, message: "Offer accepted and job created" })
   } catch (e) {
-    console.error("Accept offer error:", e);
-    res.status(500).json({ error: e.message });
+    console.error("Accept offer error:", e)
+    res.status(500).json({ error: e.message })
   }
-});
+})
 
 app.post("/api/offers/:offerId/decline", requireAuth, async (req, res) => {
   try {
-    const offer = await POWOffer.findById(req.params.offerId).populate("task");
-    if (!offer) return res.status(404).json({ error: "Offer not found" });
+    const offer = await POWOffer.findById(req.params.offerId).populate("task")
+    if (!offer) return res.status(404).json({ error: "Offer not found" })
+
     if (offer.workerAddress !== req.user.wallet)
-      return res.status(403).json({ error: "Not authorized to decline this offer" });
-    if (offer.status !== "PENDING")
-      return res.status(400).json({ error: "Offer cannot be declined" });
+      return res.status(403).json({ error: "Not authorized to decline this offer" })
 
-    offer.status = "DECLINED";
-    await offer.save();
+    if (offer.status !== "PENDING") return res.status(400).json({ error: "Offer cannot be declined" })
 
-    offer.task.status = "OPEN";
-    await offer.task.save();
+    offer.status = "DECLINED"
+    await offer.save()
 
-    res.json({ message: "Offer declined" });
+    offer.task.status = "OPEN"
+    await offer.task.save()
+
+    res.json({ message: "Offer declined" })
   } catch (e) {
-    console.error("Decline offer error:", e);
-    res.status(500).json({ error: e.message });
+    console.error("Decline offer error:", e)
+    res.status(500).json({ error: e.message })
   }
-});
+})
 
 app.delete("/api/offers/:offerId", requireAuth, async (req, res) => {
   try {
-    const offer = await POWOffer.findById(req.params.offerId).populate("task");
-    if (!offer) return res.status(404).json({ error: "Offer not found" });
+    const offer = await POWOffer.findById(req.params.offerId).populate("task")
+    if (!offer) return res.status(404).json({ error: "Offer not found" })
+
     if (offer.employerAddress.toLowerCase() !== req.user.wallet.toLowerCase())
-      return res.status(403).json({ error: "Not authorized to cancel this offer" });
+      return res.status(403).json({ error: "Not authorized to cancel this offer" })
 
     if (offer.task.status === "OFFERED") {
-      offer.task.status = "OPEN";
-      await offer.task.save();
+      offer.task.status = "OPEN"
+      await offer.task.save()
     }
 
-    await offer.deleteOne();
-    res.json({ message: "Offer cancelled successfully" });
+    await offer.deleteOne()
+    res.json({ message: "Offer cancelled successfully" })
   } catch (e) {
-    console.error("Cancel offer error:", e);
-    res.status(500).json({ error: e.message });
+    console.error("Cancel offer error:", e)
+    res.status(500).json({ error: e.message })
   }
-});
+})
 
 // ─── DISPUTE MESSAGING ────────────────────────────────────────────────────────
 app.post("/api/messages", requireAuth, async (req, res) => {
-  const { disputeId, content } = req.body;
-  if (disputeId == null || !content)
-    return res.status(400).json({ error: "Missing fields" });
+  const { disputeId, content } = req.body
+  if (disputeId == null || !content) return res.status(400).json({ error: "Missing fields" })
 
   try {
     const msg = await POWMessage.create({
       disputeId: Number(disputeId),
       sender: req.user.wallet.toLowerCase(),
       content,
-    });
-    io.to(`dispute_${disputeId}`).emit("newMessage", msg);
-    res.json(msg);
+    })
+
+    io.to(`dispute_${disputeId}`).emit("newMessage", msg)
+    res.json(msg)
   } catch (e) {
-    console.error("Message creation error:", e);
-    res.status(500).json({ error: e.message });
+    console.error("Message creation error:", e)
+    res.status(500).json({ error: e.message })
   }
-});
+})
 
 app.get("/api/messages/:disputeId", requireAuth, async (req, res) => {
-  const page = parseInt(req.query.page, 10) || 1;
-  const limit = parseInt(req.query.limit, 10) || 50;
+  const page = Number.parseInt(req.query.page, 10) || 1
+  const limit = Number.parseInt(req.query.limit, 10) || 50
+
   const msgs = await POWMessage.find({ disputeId: req.params.disputeId })
     .sort({ createdAt: 1 })
     .skip((page - 1) * limit)
-    .limit(limit);
-  res.json(msgs);
-});
+    .limit(limit)
+
+  res.json(msgs)
+})
 
 // ─── CHAT MESSAGING ENDPOINTS ────────────────────────────────────────────────
 app.post("/api/chat/messages", requireAuth, async (req, res) => {
-  const { to, content } = req.body;
-  const from = req.user.wallet;
-  if (!to || !content) return res.status(400).json({ error: "Missing fields: to and content required" });
+  const { to, content } = req.body
+  const from = req.user.wallet
+
+  if (!to || !content) return res.status(400).json({ error: "Missing fields: to and content required" })
 
   try {
-    const participants = [from.toLowerCase(), to.toLowerCase()].sort();
+    const participants = [from.toLowerCase(), to.toLowerCase()].sort()
     const chatMsg = await POWChatMessage.create({
       participants,
       sender: from.toLowerCase(),
       receiver: to.toLowerCase(),
       content,
-    });
-    const room = `chat_${participants.join("_")}`;
-    io.to(room).emit("newChatMessage", chatMsg);
-    res.json(chatMsg);
+    })
+
+    const room = `chat_${participants.join("_")}`
+    io.to(room).emit("newChatMessage", chatMsg)
+
+    res.json(chatMsg)
   } catch (e) {
-    console.error("Chat message creation error:", e);
-    res.status(500).json({ error: e.message });
+    console.error("Chat message creation error:", e)
+    res.status(500).json({ error: e.message })
   }
-});
+})
 
 app.get("/api/chat/messages/:peer", requireAuth, async (req, res) => {
-  const peer = req.params.peer;
-  const user = req.user.wallet;
-  const page = parseInt(req.query.page, 10) || 1;
-  const limit = parseInt(req.query.limit, 10) || 50;
-  const participants = [user.toLowerCase(), peer.toLowerCase()].sort();
+  const peer = req.params.peer
+  const user = req.user.wallet
+  const page = Number.parseInt(req.query.page, 10) || 1
+  const limit = Number.parseInt(req.query.limit, 10) || 50
+
+  const participants = [user.toLowerCase(), peer.toLowerCase()].sort()
 
   const msgs = await POWChatMessage.find({ participants })
     .sort({ createdAt: 1 })
     .skip((page - 1) * limit)
-    .limit(limit);
+    .limit(limit)
 
-  res.json(msgs);
-});
+  res.json(msgs)
+})
 
 app.get("/api/chat/conversations", requireAuth, async (req, res) => {
-  const user = req.user.wallet;
-  const page = parseInt(req.query.page, 10) || 1;
-  const limit = parseInt(req.query.limit, 10) || 10;
+  const user = req.user.wallet
+  const page = Number.parseInt(req.query.page, 10) || 1
+  const limit = Number.parseInt(req.query.limit, 10) || 10
 
-  const userRegex = new RegExp(`^${user}$`, "i");
+  const userRegex = new RegExp(`^${user}$`, "i")
 
   try {
     const msgs = await POWChatMessage.find({
-      $or: [
-        { sender: userRegex },
-        { receiver: userRegex }
-      ]
+      $or: [{ sender: userRegex }, { receiver: userRegex }],
     })
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
-      .limit(limit);
+      .limit(limit)
 
-    res.json(msgs);
+    res.json(msgs)
   } catch (e) {
-    console.error("Error fetching user conversations:", e);
-    res.status(500).json({ error: e.message });
+    console.error("Error fetching user conversations:", e)
+    res.status(500).json({ error: e.message })
   }
-});
-
-
-// Configure Pinata SDK
-const pinata = new PinataSDK({
-  pinataJwt: process.env.PINATA_JWT,
-  pinataGateway: process.env.PINATA_GATEWAY,
-});
+})
 
 // Multer for multipart file upload, limit 100 MB
-const upload = multer({ limits: { fileSize: 100 * 1024 * 1024 } });
+const upload = multer({ limits: { fileSize: 100 * 1024 * 1024 } })
 
 // File upload endpoint (Option B + Blob)
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
-    const { originalname, mimetype, size, buffer } = req.file;
+    const { originalname, mimetype, size, buffer } = req.file
+
     const options = {
       pinataMetadata: { name: originalname },
-      pinataOptions: { cidVersion: 1 }
-    };
+      pinataOptions: { cidVersion: 1 },
+    }
 
     // Convert Node Buffer → Blob so pinata.upload.public.file can append it
-    const blob = new Blob([buffer], { type: mimetype });
+    const blob = new Blob([buffer], { type: mimetype })
+    const uploadResult = await pinata.upload.public.file(blob, options)
 
-    const uploadResult = await pinata.upload.public.file(
-      blob,
-      options
-    );
-    const cid = uploadResult.cid;
-    const url = `https://${process.env.PINATA_GATEWAY}/ipfs/${cid}`;
+    const cid = uploadResult.cid
+    const url = `https://${process.env.PINATA_GATEWAY}/ipfs/${cid}`
 
-    res.json({ cid, url, size: `${(size / 1024 / 1024).toFixed(2)} MB`, mimeType: mimetype });
+    res.json({ cid, url, size: `${(size / 1024 / 1024).toFixed(2)} MB`, mimeType: mimetype })
   } catch (err) {
-    console.error("Upload error:", err);
-    res.status(500).json({ error: "File upload failed" });
+    console.error("Upload error:", err)
+    res.status(500).json({ error: "File upload failed" })
   }
-});
+})
 
 // Metadata pinning endpoint (unchanged)
 app.post("/api/metadata", requireAuth, async (req, res) => {
   try {
-    const { title, description, category, tags, price, license, fileCid } = req.body;
+    const { title, description, category, tags, price, license, fileCid } = req.body
+
     if (!title || !description || !category || !price || !license || !fileCid) {
-      return res.status(400).json({ error: "Missing required metadata fields" });
+      return res.status(400).json({ error: "Missing required metadata fields" })
     }
 
     const metadata = {
@@ -710,84 +914,101 @@ app.post("/api/metadata", requireAuth, async (req, res) => {
       image: `ipfs://${fileCid}`,
       attributes: [
         { trait_type: "Category", value: category },
-        { trait_type: "License", value: license }
-      ]
-    };
+        { trait_type: "License", value: license },
+      ],
+    }
 
-    const jsonResult = await pinata.upload.public.json(
-      metadata,
-      { pinataMetadata: { name: `${title}-metadata` } }
-    );
-    const metadataCid = jsonResult.cid;
-    const metadataUri = `ipfs://${metadataCid}`;
+    const jsonResult = await pinata.upload.public.json(metadata, { pinataMetadata: { name: `${title}-metadata` } })
 
-    res.status(201).json({ metadataUri, metadataCid });
+    const metadataCid = jsonResult.cid
+    const metadataUri = `ipfs://${metadataCid}`
+
+    res.status(201).json({ metadataUri, metadataCid })
   } catch (err) {
-    console.error("Metadata error:", err);
-    res.status(500).json({ error: "Metadata pinning failed" });
+    console.error("Metadata error:", err)
+    res.status(500).json({ error: "Metadata pinning failed" })
   }
-});
+})
 
 app.get("/api/assets", async (req, res) => {
   try {
     const assets = await Asset.find().select(
-      "title description type category tags price license fileCid fileSize mimeType metadataCid metadataUri tokenId creatorAddress status downloads rating reviewCount createdAt updatedAt"
-    );
-    res.json(assets);
+      "title description type category tags price license fileCid fileSize mimeType metadataCid metadataUri tokenId creatorAddress status downloads rating reviewCount createdAt updatedAt",
+    )
+    res.json(assets)
   } catch (err) {
-    console.error("Error fetching assets:", err);
-    res.status(500).json({ error: "Failed to fetch assets" });
+    console.error("Error fetching assets:", err)
+    res.status(500).json({ error: "Failed to fetch assets" })
   }
-});
+})
 
 app.post("/api/assets", requireAuth, async (req, res) => {
   try {
-    const { title, description, type, category, tags, price, license, fileCid, metadataCid, metadataUri, transactionHash, fileSize, mimeType } =
-      req.body;
+    const {
+      title,
+      description,
+      type,
+      category,
+      tags,
+      price,
+      license,
+      fileCid,
+      metadataCid,
+      metadataUri,
+      transactionHash,
+      fileSize,
+      mimeType,
+    } = req.body
 
     // Validate input
-    if (!title || !description || !category || !price || !license || !fileCid || !metadataCid || !metadataUri || !transactionHash || !fileSize || !mimeType || !type) {
-      return res.status(400).json({ error: "Missing required fields" });
+    if (
+      !title ||
+      !description ||
+      !category ||
+      !price ||
+      !license ||
+      !fileCid ||
+      !metadataCid ||
+      !metadataUri ||
+      !transactionHash ||
+      !fileSize ||
+      !mimeType ||
+      !type
+    ) {
+      return res.status(400).json({ error: "Missing required fields" })
     }
 
     // Initialize ethers.js provider
-    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL)
 
     // Get the transaction receipt
-    const receipt = await provider.getTransactionReceipt(transactionHash);
+    const receipt = await provider.getTransactionReceipt(transactionHash)
     if (!receipt || receipt.status !== 1) {
-      return res.status(400).json({ error: "Invalid or failed transaction" });
+      return res.status(400).json({ error: "Invalid or failed transaction" })
     }
 
-    const contract = license === "standard"
-      ? new ethers.Contract(
-        process.env.NEXT_PUBLIC_ERC1155_ADDRESS || '',
-        STANDARD_LICENSE_1155,
-        provider
-      )
-      : new ethers.Contract(
-        process.env.NEXT_PUBLIC_ERC721_ADDRESS || '',
-        EXCLUSIVE_LICENSE_721,
-        provider
-      );
+    const contract =
+      license === "standard"
+        ? new ethers.Contract(process.env.NEXT_PUBLIC_ERC1155_ADDRESS || "", STANDARD_LICENSE_1155, provider)
+        : new ethers.Contract(process.env.NEXT_PUBLIC_ERC721_ADDRESS || "", EXCLUSIVE_LICENSE_721, provider)
 
     // Extract the `id` from the respective event
-    const eventName = license === "standard" ? "AssetRegistered" : "AssetRegisteredExclusive";
+    const eventName = license === "standard" ? "AssetRegistered" : "AssetRegisteredExclusive"
     const event = receipt.logs
       .map((log) => {
         try {
-          return contract.interface.parseLog(log);
+          return contract.interface.parseLog(log)
         } catch {
-          return null;
+          return null
         }
       })
-      .find((parsedLog) => parsedLog && parsedLog.name === eventName);
+      .find((parsedLog) => parsedLog && parsedLog.name === eventName)
 
     if (!event) {
-      return res.status(400).json({ error: `${eventName} event not found in transaction` });
+      return res.status(400).json({ error: `${eventName} event not found in transaction` })
     }
 
-    const [tokenId] = event?.args || [];
+    const [tokenId] = event?.args || []
 
     // Save the asset in the database
     const asset = await Asset.create({
@@ -808,189 +1029,172 @@ app.post("/api/assets", requireAuth, async (req, res) => {
       status: "active",
       createdAt: new Date(),
       updatedAt: new Date(),
-    });
+    })
 
-    res.status(201).json({ assetId: asset._id });
+    res.status(201).json({ assetId: asset._id })
   } catch (err) {
-    console.error("Error saving asset:", err);
-    res.status(500).json({ error: "Failed to save asset" });
+    console.error("Error saving asset:", err)
+    res.status(500).json({ error: "Failed to save asset" })
   }
-});
+})
 
 app.post("/api/mint-standard", requireAuth, async (req, res) => {
   try {
-    const { txHash, assetId, quantity } = req.body;
+    const { txHash, assetId, quantity } = req.body
 
     // Validate input
     if (!txHash || !assetId || !quantity) {
-      return res.status(400).json({ error: "txHash, assetId, and quantity are required" });
+      return res.status(400).json({ error: "txHash, assetId, and quantity are required" })
     }
 
     // Fetch the asset from the database
-    const asset = await Asset.findOne({ tokenId: assetId });
+    const asset = await Asset.findOne({ tokenId: assetId })
     if (!asset || asset.license !== "standard") {
-      return res.status(404).json({ error: "Asset not found or invalid license type" });
+      return res.status(404).json({ error: "Asset not found or invalid license type" })
     }
 
     // Initialize ethers.js provider
-    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL)
 
     // Get the transaction receipt
-    const receipt = await provider.getTransactionReceipt(txHash);
+    const receipt = await provider.getTransactionReceipt(txHash)
     if (!receipt || receipt.status !== 1) {
-      return res.status(400).json({ error: "Invalid or failed transaction" });
+      return res.status(400).json({ error: "Invalid or failed transaction" })
     }
 
     // Validate the transaction
-    const logs = receipt.logs;
-    const purchaseEvent = logs.find((log) =>
-      log.topics[0] === ethers.id("AssetPurchased(address,uint256,uint256,uint256)")
-    );
+    const logs = receipt.logs
+    const purchaseEvent = logs.find(
+      (log) => log.topics[0] === ethers.id("AssetPurchased(address,uint256,uint256,uint256)"),
+    )
 
     if (!purchaseEvent) {
-      return res.status(400).json({ error: "Purchase event not found in transaction" });
+      return res.status(400).json({ error: "Purchase event not found in transaction" })
     }
 
     // Create an interface to properly decode the event
     const eventInterface = new ethers.Interface([
-      "event AssetPurchased(address indexed buyer,  uint256 indexed id, uint256 amount, uint256 price)"
-    ]);
+      "event AssetPurchased(address indexed buyer,  uint256 indexed id, uint256 amount, uint256 price)",
+    ])
 
     const decodedEvent = eventInterface.parseLog({
       topics: purchaseEvent.topics,
-      data: purchaseEvent.data
-    });
+      data: purchaseEvent.data,
+    })
 
-
-    const { buyer, id, amount, price } = decodedEvent.args;
-
-    // const abiCoder = new AbiCoder();
-    // const [buyer, id, amount, price] = abiCoder.decode(
-    //   ["address", "uint256", "uint256", "uint256"],
-    //   purchaseEvent.data
-    // );
+    const { buyer, id, amount, price } = decodedEvent.args
 
     if (id.toString() !== assetId.toString() || amount.toString() !== quantity.toString()) {
-      return res.status(400).json({ error: "Asset ID or quantity mismatch" });
+      return res.status(400).json({ error: "Asset ID or quantity mismatch" })
     }
 
     // Update the asset's status in the database
-    asset.status = "active";
-    asset.downloads = (asset.downloads || 0) + parseInt(amount.toString(), 10);
-    await asset.save();
+    asset.status = "active"
+    asset.downloads = (asset.downloads || 0) + Number.parseInt(amount.toString(), 10)
+    await asset.save()
 
-    res.json({ message: "Purchase confirmed", txHash });
+    res.json({ message: "Purchase confirmed", txHash })
   } catch (err) {
-    console.error("Mint standard error:", err);
-    res.status(500).json({ error: "Failed to confirm purchase" });
+    console.error("Mint standard error:", err)
+    res.status(500).json({ error: "Failed to confirm purchase" })
   }
-});
+})
 
 app.post("/api/mint-exclusive", requireAuth, async (req, res) => {
   try {
-    const { txHash, assetId } = req.body;
+    const { txHash, assetId } = req.body
 
     // Validate input
     if (!txHash || !assetId) {
-      return res.status(400).json({ error: "txHash and assetId are required" });
+      return res.status(400).json({ error: "txHash and assetId are required" })
     }
 
     // Fetch the asset from the database
-    const asset = await Asset.findOne({ tokenId: assetId });
+    const asset = await Asset.findOne({ tokenId: assetId })
     if (!asset || asset.license !== "exclusive") {
-      return res.status(404).json({ error: "Asset not found or invalid license type" });
+      return res.status(404).json({ error: "Asset not found or invalid license type" })
     }
 
     // Initialize ethers.js provider
-    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL)
 
     // Get the transaction receipt
-    const receipt = await provider.getTransactionReceipt(txHash);
+    const receipt = await provider.getTransactionReceipt(txHash)
     if (!receipt || receipt.status !== 1) {
-      return res.status(400).json({ error: "Invalid or failed transaction" });
+      return res.status(400).json({ error: "Invalid or failed transaction" })
     }
 
     // Validate the transaction
-    const logs = receipt.logs;
-    const purchaseEvent = logs.find((log) =>
-      log.topics[0] === ethers.id("ExclusivePurchased(address,uint256,uint256)")
-    );
+    const logs = receipt.logs
+    const purchaseEvent = logs.find((log) => log.topics[0] === ethers.id("ExclusivePurchased(address,uint256,uint256)"))
 
     if (!purchaseEvent) {
-      return res.status(400).json({ error: "Purchase event not found in transaction" });
+      return res.status(400).json({ error: "Purchase event not found in transaction" })
     }
 
     // Create an interface to properly decode the event
     const eventInterface = new ethers.Interface([
-      "event ExclusivePurchased(address indexed buyer, uint256 indexed id, uint256 price)"
-    ]);
+      "event ExclusivePurchased(address indexed buyer, uint256 indexed id, uint256 price)",
+    ])
 
     const decodedEvent = eventInterface.parseLog({
       topics: purchaseEvent.topics,
-      data: purchaseEvent.data
-    });
+      data: purchaseEvent.data,
+    })
 
-    const { buyer, id, amount, price } = decodedEvent.args;
-
-    // const abiCoder = new AbiCoder();
-    // const [buyer, id, price] = abiCoder.decode(
-    //   ["address", "uint256", "uint256"],
-    //   purchaseEvent.data
-    // );
+    const { buyer, id, amount, price } = decodedEvent.args
 
     if (id.toString() !== assetId.toString()) {
-      return res.status(400).json({ error: "Asset ID mismatch" });
+      return res.status(400).json({ error: "Asset ID mismatch" })
     }
 
     // Update the asset's status in the database
-    asset.status = "active";
-    asset.downloads = (asset.downloads || 0) + parseInt(amount.toString(), 10);
-    await asset.save();
+    asset.status = "active"
+    asset.downloads = (asset.downloads || 0) + Number.parseInt(amount.toString(), 10)
+    await asset.save()
 
-    res.json({ message: "Purchase confirmed", txHash });
+    res.json({ message: "Purchase confirmed", txHash })
   } catch (err) {
-    console.error("Mint exclusive error:", err);
-    res.status(500).json({ error: "Failed to confirm purchase" });
+    console.error("Mint exclusive error:", err)
+    res.status(500).json({ error: "Failed to confirm purchase" })
   }
-});
+})
 
 const getExclusivePurchases = async (userAddress) => {
   try {
-    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
-
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL)
     const exclusiveContract = new ethers.Contract(
-      process.env.NEXT_PUBLIC_ERC721_ADDRESS || '',
+      process.env.NEXT_PUBLIC_ERC721_ADDRESS || "",
       EXCLUSIVE_LICENSE_721,
-      provider
-    );
+      provider,
+    )
 
-    const filter = exclusiveContract.filters.ExclusivePurchased(userAddress);
-    const events = await exclusiveContract.queryFilter(filter);
+    const filter = exclusiveContract.filters.ExclusivePurchased(userAddress)
+    const events = await exclusiveContract.queryFilter(filter)
 
-    const purchases = [];
-
-    for(const event of events) {
-      const { buyer, id, price } = event.args;
-
+    const purchases = []
+    for (const event of events) {
+      const { buyer, id, price } = event.args
       const asset = await Asset.findOne({
-        tokenId: id
-      });
+        tokenId: id,
+      })
 
-      const blockInfo = await provider.send('eth_getBlockByNumber', [
+      const blockInfo = await provider.send("eth_getBlockByNumber", [
         `0x${event.blockNumber.toString(16)}`, // Convert to hex
-        false // Don't include transactions
-      ]);
-      const purchaseDate = new Date(parseInt(blockInfo.timestamp, 16) * 1000);      
+        false, // Don't include transactions
+      ])
+
+      const purchaseDate = new Date(Number.parseInt(blockInfo.timestamp, 16) * 1000)
 
       purchases.push({
         asset,
         purchaseDate,
-        licenseType: 'Exclusive',
-        price: ethers.formatEther(price)
+        licenseType: "Exclusive",
+        price: ethers.formatEther(price),
       })
     }
 
-    return purchases;
+    return purchases
   } catch (error) {
     console.error(`Exclusive Error:`, error)
   }
@@ -998,106 +1202,109 @@ const getExclusivePurchases = async (userAddress) => {
 
 const getStandardPurchases = async (userAddress) => {
   try {
-    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
-
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL)
     const standardContract = new ethers.Contract(
-      process.env.NEXT_PUBLIC_ERC1155_ADDRESS || '',
+      process.env.NEXT_PUBLIC_ERC1155_ADDRESS || "",
       STANDARD_LICENSE_1155,
-      provider
-    );
+      provider,
+    )
 
-    const filter = standardContract.filters.AssetPurchased(userAddress);
-    const events = await standardContract.queryFilter(filter);
+    const filter = standardContract.filters.AssetPurchased(userAddress)
+    const events = await standardContract.queryFilter(filter)
 
-    const purchases = [];
-
-    for(const event of events) {
-      const { buyer, id, price } = event.args;
-
+    const purchases = []
+    for (const event of events) {
+      const { buyer, id, price } = event.args
       const asset = await Asset.findOne({
-        tokenId: id
-      });
+        tokenId: id,
+      })
 
-      const blockInfo = await provider.send('eth_getBlockByNumber', [
+      const blockInfo = await provider.send("eth_getBlockByNumber", [
         `0x${event.blockNumber.toString(16)}`, // Convert to hex
-        false // Don't include transactions
-      ]);
-      const purchaseDate = new Date(parseInt(blockInfo.timestamp, 16) * 1000);
+        false, // Don't include transactions
+      ])
+
+      const purchaseDate = new Date(Number.parseInt(blockInfo.timestamp, 16) * 1000)
 
       purchases.push({
         asset,
         purchaseDate,
-        licenseType: 'Standard',
-        price: ethers.formatEther(price)
+        licenseType: "Standard",
+        price: ethers.formatEther(price),
       })
     }
 
-    return purchases;
+    return purchases
   } catch (error) {
-    console.error(`Standard Error:`, error);
+    console.error(`Standard Error:`, error)
   }
 }
 
-app.get('/api/purchases', requireAuth, async (req, res) => {
+app.get("/api/purchases", requireAuth, async (req, res) => {
   try {
-    const userAddress = req.user.wallet;
-
-    console.log("User Address:", userAddress);
+    const userAddress = req.user.wallet
+    console.log("User Address:", userAddress)
 
     const [exclusivePurchases, standardPurchases] = await Promise.all([
       getExclusivePurchases(userAddress),
-      getStandardPurchases(userAddress)
-    ]);
+      getStandardPurchases(userAddress),
+    ])
 
-    let allPurchases = [...(Array.isArray(exclusivePurchases) ? exclusivePurchases : []), ...(Array.isArray(standardPurchases) ? standardPurchases : [])];
+    let allPurchases = [
+      ...(Array.isArray(exclusivePurchases) ? exclusivePurchases : []),
+      ...(Array.isArray(standardPurchases) ? standardPurchases : []),
+    ]
 
-    allPurchases.sort((a, b) => b.purchaseDate.getTime() - a.purchaseDate.getTime());
-    allPurchases = allPurchases.filter((purchase) => purchase.asset !== null);
+    allPurchases.sort((a, b) => b.purchaseDate.getTime() - a.purchaseDate.getTime())
+    allPurchases = allPurchases.filter((purchase) => purchase.asset !== null)
 
-    // return { assets: allPurchases };
-    res.status(200).json({ assets: allPurchases });
+    res.status(200).json({ assets: allPurchases })
   } catch (error) {
-    console.error("Error fetching purchases:", error);
-    res.status(500).json({ error: "Failed to fetch purchases" });
+    console.error("Error fetching purchases:", error)
+    res.status(500).json({ error: "Failed to fetch purchases" })
   }
-});
+})
 
 // ─── SOCKET.IO ────────────────────────────────────────────────────────────────
 io.on("connection", (socket) => {
-  console.log("WS connected:", socket.id);
+  console.log("WS connected:", socket.id)
 
-  socket.on("joinRoom", (id) => socket.join(`dispute_${id}`));
+  socket.on("joinRoom", (id) => socket.join(`dispute_${id}`))
+
   socket.on("sendMessage", (msg) => {
     if (msg.disputeId && msg.content && msg.sender) {
-      io.to(`dispute_${msg.disputeId}`).emit("newMessage", msg);
+      io.to(`dispute_${msg.disputeId}`).emit("newMessage", msg)
     }
-  });
+  })
 
   socket.on("joinChat", ({ me, peer }) => {
-    const participants = [me, peer].sort();
-    socket.join(`chat_${participants.join("_")}`);
-  });
+    const participants = [me, peer].sort()
+    socket.join(`chat_${participants.join("_")}`)
+  })
+
   socket.on("sendChatMessage", async (data) => {
-    const { sender, to, content } = data;
-    if (!sender || !to || !content) return;
-    const participants = [sender, to].sort();
+    const { sender, to, content } = data
+    if (!sender || !to || !content) return
+
+    const participants = [sender, to].sort()
     try {
       const chatMsg = await POWChatMessage.create({
         participants,
         sender,
         receiver: to,
         content,
-      });
-      const room = `chat_${participants.join("_")}`;
-      io.to(room).emit("newChatMessage", chatMsg);
+      })
+
+      const room = `chat_${participants.join("_")}`
+      io.to(room).emit("newChatMessage", chatMsg)
     } catch (e) {
-      console.error("Socket chat error:", e);
+      console.error("Socket chat error:", e)
     }
-  });
-});
+  })
+})
 
 // ─── HEALTHCHECK & START ──────────────────────────────────────────────────────
-app.get("/", (req, res) => res.send("🔥 ProofOfWork API is live!"));
+app.get("/", (req, res) => res.send("🔥 ProofOfWork API is live!"))
 
-const PORT = process.env.PORT || 3066;
-server.listen(PORT, () => console.log(`🌐 Listening on port ${PORT}`));
+const PORT = process.env.PORT || 3066
+server.listen(PORT, () => console.log(`🌐 Listening on port ${PORT}`))
