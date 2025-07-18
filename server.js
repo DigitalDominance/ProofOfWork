@@ -73,9 +73,7 @@ mongoose.connection.once("open", () => {
 const userSchema = new mongoose.Schema({
   wallet: { type: String, unique: true, required: true },
   displayName: { type: String, required: true, immutable: true },
-  username: { type: String, default: null, unique: true, sparse: true }, // Add unique and sparse
   profileImageCid: { type: String, default: null },
-  lastUsernameChange: { type: Date, default: null },
   lastProfileImageChange: { type: Date, default: null },
   role: { type: String, enum: ["employer", "worker"], required: true },
   createdAt: { type: Date, default: Date.now },
@@ -223,7 +221,7 @@ app.post("/api/auth/challenge", (req, res) => {
 
 app.post("/api/auth/verify", async (req, res) => {
   try {
-    const { wallet, signature, displayName, role, username } = req.body // Add username
+    const { wallet, signature, displayName, role } = req.body // Remove username
     if (!wallet || !signature) return res.status(400).json({ error: "Missing wallet or signature" })
 
     const normalizedWallet = wallet.toLowerCase()
@@ -237,22 +235,10 @@ app.post("/api/auth/verify", async (req, res) => {
     if (!user) {
       if (!displayName || !role) return res.status(400).json({ error: "displayName and role required" })
 
-      // Check username uniqueness if provided
-      if (username) {
-        const existingUsername = await POWUser.findOne({
-          username: { $regex: `^${username.trim()}$`, $options: "i" },
-        })
-        if (existingUsername) {
-          return res.status(409).json({ error: "Username is already taken" })
-        }
-      }
-
       user = await POWUser.create({
         wallet: normalizedWallet,
         displayName,
         role,
-        username: username ? username.trim() : null,
-        lastUsernameChange: username ? new Date() : null,
       })
     }
 
@@ -262,9 +248,6 @@ app.post("/api/auth/verify", async (req, res) => {
     res.json({ accessToken, refreshToken })
   } catch (e) {
     console.error("Auth error:", e)
-    if (e.code === 11000 && e.keyPattern?.username) {
-      return res.status(409).json({ error: "Username is already taken" })
-    }
     res.status(401).json({ error: "Auth failed", details: e.message })
   }
 })
@@ -298,45 +281,13 @@ function requireAuth(req, res, next) {
   }
 }
 
-// ─── USERNAME AVAILABILITY CHECK ENDPOINT ─────────────────────────────────────
-app.get("/api/users/username/:username/available", async (req, res) => {
-  try {
-    const username = req.params.username.trim()
-
-    if (!username || username.length === 0) {
-      return res.status(400).json({ error: "Username is required" })
-    }
-
-    if (username.length > 50) {
-      return res.status(400).json({ error: "Username must be 50 characters or less" })
-    }
-
-    const existingUser = await POWUser.findOne({
-      username: { $regex: `^${username}$`, $options: "i" },
-    })
-
-    res.json({
-      available: !existingUser,
-      username: username,
-    })
-  } catch (error) {
-    console.error("Username availability check error:", error)
-    res.status(500).json({ error: "Failed to check username availability" })
-  }
-})
-
 // ─── UPDATED USER ENDPOINTS WITH PROFILE IMAGE AND USERNAME LOOKUP ────────────
 app.get("/api/users/:identifier", async (req, res) => {
   try {
     const identifier = req.params.identifier.toLowerCase()
 
-    // Try to find by wallet first, then by username
-    let user = await POWUser.findOne({ wallet: { $regex: `^${identifier}$`, $options: "i" } })
-
-    if (!user) {
-      // If not found by wallet, try by username
-      user = await POWUser.findOne({ username: { $regex: `^${identifier}$`, $options: "i" } })
-    }
+    // Only search by wallet
+    const user = await POWUser.findOne({ wallet: { $regex: `^${identifier}$`, $options: "i" } })
 
     if (!user) return res.status(404).json({ error: "User not found" })
 
@@ -359,76 +310,13 @@ app.head("/api/users/:identifier", async (req, res) => {
   try {
     const identifier = req.params.identifier.toLowerCase()
 
-    // Check if user exists by wallet or username
-    let exists = await POWUser.exists({ wallet: { $regex: `^${identifier}$`, $options: "i" } })
-
-    if (!exists) {
-      exists = await POWUser.exists({ username: { $regex: `^${identifier}$`, $options: "i" } })
-    }
+    // Check if user exists by wallet only
+    const exists = await POWUser.exists({ wallet: { $regex: `^${identifier}$`, $options: "i" } })
 
     res.sendStatus(exists ? 200 : 404)
   } catch (error) {
     console.error("User exists check error:", error)
     res.sendStatus(500)
-  }
-})
-
-// ─── NEW USERNAME UPDATE ENDPOINT ─────────────────────────────────────────────
-app.put("/api/users/username", requireAuth, async (req, res) => {
-  try {
-    const { username } = req.body
-
-    if (!username || username.trim().length === 0) {
-      return res.status(400).json({ error: "Username is required" })
-    }
-
-    if (username.length > 50) {
-      return res.status(400).json({ error: "Username must be 50 characters or less" })
-    }
-
-    const user = await POWUser.findOne({
-      wallet: { $regex: `^${req.user.wallet.toLowerCase()}$`, $options: "i" },
-    })
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found" })
-    }
-
-    // Check if 30 days have passed since last username change
-    const now = new Date()
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-
-    if (user.lastUsernameChange && user.lastUsernameChange > thirtyDaysAgo) {
-      const nextAllowedChange = new Date(user.lastUsernameChange.getTime() + 30 * 24 * 60 * 60 * 1000)
-      return res.status(429).json({
-        error: "Username can only be changed once every 30 days",
-        nextAllowedChange: nextAllowedChange.toISOString(),
-      })
-    }
-
-    // Check if username is already taken by another user
-    const existingUser = await POWUser.findOne({
-      username: { $regex: `^${username.trim()}$`, $options: "i" },
-      wallet: { $ne: user.wallet },
-    })
-
-    if (existingUser) {
-      return res.status(409).json({ error: "Username is already taken" })
-    }
-
-    // Update username and timestamp
-    user.username = username.trim()
-    user.lastUsernameChange = now
-    await user.save()
-
-    res.json({
-      message: "Username updated successfully",
-      username: user.username,
-      nextAllowedChange: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    })
-  } catch (error) {
-    console.error("Username update error:", error)
-    res.status(500).json({ error: "Failed to update username" })
   }
 })
 
