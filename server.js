@@ -75,6 +75,7 @@ const userSchema = new mongoose.Schema({
   displayName: { type: String, required: true },
   profileImageCid: { type: String, default: null },
   lastProfileImageChange: { type: Date, default: null },
+  lastDisplayNameChange: { type: Date, default: null }, // Add this field
   role: { type: String, enum: ["employer", "worker"], required: true },
   createdAt: { type: Date, default: Date.now },
 })
@@ -421,13 +422,27 @@ app.put("/api/users/display-name", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "User not found" })
     }
 
-    // Update display name
+    // Check if 14 days have passed since last display name change
+    const now = new Date()
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
+
+    if (user.lastDisplayNameChange && user.lastDisplayNameChange > fourteenDaysAgo) {
+      const nextAllowedChange = new Date(user.lastDisplayNameChange.getTime() + 14 * 24 * 60 * 60 * 1000)
+      return res.status(429).json({
+        error: "Display name can only be changed once every 14 days",
+        nextAllowedChange: nextAllowedChange.toISOString(),
+      })
+    }
+
+    // Update display name and timestamp
     user.displayName = displayName.trim()
+    user.lastDisplayNameChange = now
     await user.save()
 
     res.json({
       message: "Display name updated successfully",
       displayName: user.displayName,
+      nextAllowedChange: new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString(),
     })
   } catch (error) {
     console.error("Display name update error:", error)
@@ -876,11 +891,12 @@ app.post("/api/assets", requireAuth, async (req, res) => {
       price,
       license,
       fileCid,
+      fileSize,
       metadataCid,
       metadataUri,
-      transactionHash,
-      fileSize,
+      tokenId,
       mimeType,
+      transactionHash,
     } = req.body
 
     // Validate input
@@ -891,47 +907,15 @@ app.post("/api/assets", requireAuth, async (req, res) => {
       !price ||
       !license ||
       !fileCid ||
+      !fileSize ||
       !metadataCid ||
       !metadataUri ||
-      !transactionHash ||
-      !fileSize ||
+      !tokenId ||
       !mimeType ||
-      !type
+      !transactionHash
     ) {
       return res.status(400).json({ error: "Missing required fields" })
     }
-
-    // Initialize ethers.js provider
-    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL)
-
-    // Get the transaction receipt
-    const receipt = await provider.getTransactionReceipt(transactionHash)
-    if (!receipt || receipt.status !== 1) {
-      return res.status(400).json({ error: "Invalid or failed transaction" })
-    }
-
-    const contract =
-      license === "standard"
-        ? new ethers.Contract(process.env.NEXT_PUBLIC_ERC1155_ADDRESS || "", STANDARD_LICENSE_1155, provider)
-        : new ethers.Contract(process.env.NEXT_PUBLIC_ERC721_ADDRESS || "", EXCLUSIVE_LICENSE_721, provider)
-
-    // Extract the `id` from the respective event
-    const eventName = license === "standard" ? "AssetRegistered" : "AssetRegisteredExclusive"
-    const event = receipt.logs
-      .map((log) => {
-        try {
-          return contract.interface.parseLog(log)
-        } catch {
-          return null
-        }
-      })
-      .find((parsedLog) => parsedLog && parsedLog.name === eventName)
-
-    if (!event) {
-      return res.status(400).json({ error: `${eventName} event not found in transaction` })
-    }
-
-    const [tokenId] = event?.args || []
 
     // Save the asset in the database
     const asset = await Asset.create({
@@ -945,9 +929,9 @@ app.post("/api/assets", requireAuth, async (req, res) => {
       fileCid,
       fileSize,
       metadataCid,
+      metadataUri,
       tokenId,
       mimeType,
-      metadataUri,
       creatorAddress: req.user.wallet,
       status: "active",
       createdAt: new Date(),
