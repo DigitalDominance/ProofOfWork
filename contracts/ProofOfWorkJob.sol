@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./ReputationSystem.sol";
 import "./DisputeDAO.sol";
+import "./ZKResume.sol";
 
 contract ProofOfWorkJob is ReentrancyGuard {
     enum PayType { WEEKLY, ONE_OFF }
@@ -26,15 +27,19 @@ contract ProofOfWorkJob is ReentrancyGuard {
 
     ReputationSystem public reputation;
     DisputeDAO public disputeDAO;
+    ZKResume public zkResume;
 
     // Job completion tracking for ratings
     mapping(address => bool) public hasCompletedJob;
     mapping(address => bool) public hasRatedEmployer;
     mapping(address => bool) public employerHasRatedWorker;
+    mapping(address => uint8) public workerRatings; // Store ratings for ZkResume
+    mapping(address => uint8) public employerRatings; // Store ratings for ZkResume
 
     mapping(address => bool) public hasRequestedPayment;
     mapping(address => uint256) public paymentRequestTime;
     mapping(address => bool) public hasReceivedAllPayments;
+    mapping(address => uint256) public workerStartTime; // Track when worker started
     
     bool public jobEnded = false;
     bool public jobCancelled = false;
@@ -77,6 +82,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
     event JobCancelled(uint256 refundAmount);
     event PaymentRequested(address indexed worker, uint256 requestTime);
     event PaymentConfirmed(address indexed worker, uint256 amount);
+    event WorkRecordCreated(address indexed worker, address indexed zkResume);
+    event WorkRecordCreationFailed(address indexed worker, string reason);
 
     modifier onlyEmployer() {
         require(msg.sender == employer, "Only employer");
@@ -103,7 +110,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
         string memory _description,
         uint256 _positions,
         address _disputeDAO,
-        string[] memory _tags
+        string[] memory _tags,
+        address _zkResume
     ) payable {
         employer = _employer;
         payType = PayType(_payType);
@@ -124,6 +132,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
 
         reputation = new ReputationSystem(address(this));
         disputeDAO = DisputeDAO(_disputeDAO);
+        zkResume = ZKResume(_zkResume);
     }
 
     function requestWeeklyPayment() external jobNotCancelled {
@@ -164,6 +173,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         if (payoutsMade == durationWeeks) {
             hasCompletedJob[w] = true;
             hasReceivedAllPayments[w] = true;
+            _createWorkRecord(w);
         }
         
         emit PaymentConfirmed(w, amount);
@@ -199,6 +209,8 @@ contract ProofOfWorkJob is ReentrancyGuard {
         reputation.updateWorker(w, 1);
         hasCompletedJob[w] = true;
         hasReceivedAllPayments[w] = true;
+
+        _createWorkRecord(w);
         
         emit PaymentConfirmed(w, amount);
         emit OneOffPayment(w, amount);
@@ -237,7 +249,13 @@ contract ProofOfWorkJob is ReentrancyGuard {
         require(score >= 1 && score <= 5, "Score must be 1-5");
 
         employerHasRatedWorker[worker] = true;
+        employerRatings[worker] = score;
         reputation.submitRating(worker, score);
+
+        // Update ZkResume with rating
+        if (address(zkResume) != address(0)) {
+            zkResume.updateRating(worker, score, workerRatings[worker]);
+        }        
         
         emit RatingSubmitted(msg.sender, worker, score);
     }
@@ -251,7 +269,13 @@ contract ProofOfWorkJob is ReentrancyGuard {
         require(score >= 1 && score <= 5, "Score must be 1-5");
 
         hasRatedEmployer[msg.sender] = true;
+        workerRatings[msg.sender] = score;
         reputation.submitRating(employer, score);
+
+        // Update ZkResume with rating
+        if (address(zkResume) != address(0)) {
+            zkResume.updateRating(msg.sender, employerRatings[msg.sender], score);
+        }        
         
         emit RatingSubmitted(msg.sender, employer, score);
     }
@@ -326,6 +350,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
         // Assign as worker
         isWorker[applicant] = true;
         activeWorker[applicant] = true;
+        workerStartTime[applicant] = block.timestamp;
         assignedWorkers.push(applicant);
 
         emit ApplicationAccepted(applicant);
@@ -432,6 +457,7 @@ contract ProofOfWorkJob is ReentrancyGuard {
 
         isWorker[worker] = true;
         activeWorker[worker] = true;
+        workerStartTime[worker] = block.timestamp;
         assignedWorkers.push(worker);
 
         // If they had applied, mark as reviewed and accepted
@@ -482,6 +508,29 @@ contract ProofOfWorkJob is ReentrancyGuard {
         
         return pending;
     }
+
+    // ==================== ZKRESUME INTEGRATION ====================
+
+    function _createWorkRecord(address worker) internal {
+        if (address(zkResume) == address(0)) return;
+        
+        uint256 startTime = workerStartTime[worker];
+        if (startTime == 0) startTime = createdAt;
+        
+        zkResume.addWorkRecord(
+            worker,
+            employer,
+            title,
+            description,
+            tags,
+            payType == PayType.ONE_OFF ? totalPay : weeklyPay * durationWeeks,
+            durationWeeks,
+            uint8(payType),
+            startTime
+        );
+
+        emit WorkRecordCreated(worker, address(zkResume));
+    }    
 
     function openDispute(string calldata reason) external jobNotCancelled {
         uint256 id = disputeDAO.createDispute(address(this), reason);

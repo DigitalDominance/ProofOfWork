@@ -3,11 +3,13 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./ProofOfWorkJob.sol";
+import "./ZKResume.sol";
 
 contract JobFactory is ReentrancyGuard {
     address public admin;
     address payable public feeRecipient = payable(0xA0c5048c32870bB66d0BE861643cD6Bb5F66Ada2);
     address public disputeDAOAddress;
+    address public zkResumeAddress;
     address[] public allJobs;
     
 
@@ -15,15 +17,17 @@ contract JobFactory is ReentrancyGuard {
 
     event JobCreated(address indexed jobAddress, address indexed employer);
     event MinimumJobAmountUpdated(uint256 newAmount);
+    event ZKResumeUpdated(address indexed newZKResume);
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Not admin");
         _;
     }
 
-    constructor(address _admin, address _disputeDAO) {
+    constructor(address _admin, address _disputeDAO, address _zkResume) {
         admin = _admin;
         disputeDAOAddress = _disputeDAO;
+        zkResumeAddress = _zkResume;
     }
 
 
@@ -58,10 +62,17 @@ contract JobFactory is ReentrancyGuard {
             _description,
             _positions,
             disputeDAOAddress,
-            _tags
+            _tags,
+            zkResumeAddress
         );
 
         allJobs.push(address(job));
+
+        // Authorize the job in ZKResume
+        if (zkResumeAddress != address(0)) {
+            ZKResume(zkResumeAddress).authorizeJob(address(job));
+        }
+
         emit JobCreated(address(job), _employer);
         return address(job);
     }
@@ -108,4 +119,14 @@ contract JobFactory is ReentrancyGuard {
         require(_newDisputeDAO != address(0), "Invalid dispute DAO address");
         disputeDAOAddress = _newDisputeDAO;
     }
+
+    function updateZKResume(address _newZKResume) external onlyAdmin {
+        require(_newZKResume != address(0), "Invalid ZKResume address");
+        zkResumeAddress = _newZKResume;
+        emit ZKResumeUpdated(_newZKResume);
+    }    
+
+    function getZKResumeAddress() external view returns (address) {
+        return zkResumeAddress;
+    }    
 }
