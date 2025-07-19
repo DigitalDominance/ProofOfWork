@@ -882,40 +882,52 @@ app.get("/api/assets", async (req, res) => {
 
 app.post("/api/assets", requireAuth, async (req, res) => {
   try {
-    const {
-      title,
-      description,
-      type,
-      category,
-      tags,
-      price,
-      license,
-      fileCid,
-      fileSize,
-      metadataCid,
-      metadataUri,
-      tokenId,
-      mimeType,
-      transactionHash,
-    } = req.body
+    const { title, description, type, category, tags, price, license, fileCid, metadataCid, metadataUri, transactionHash, fileSize, mimeType } =
+      req.body;
 
     // Validate input
-    if (
-      !title ||
-      !description ||
-      !category ||
-      !price ||
-      !license ||
-      !fileCid ||
-      !fileSize ||
-      !metadataCid ||
-      !metadataUri ||
-      !tokenId ||
-      !mimeType ||
-      !transactionHash
-    ) {
-      return res.status(400).json({ error: "Missing required fields" })
+    if (!title || !description || !category || !price || !license || !fileCid || !metadataCid || !metadataUri || !transactionHash || !fileSize || !mimeType || !type) {
+      return res.status(400).json({ error: "Missing required fields" });
     }
+
+    // Initialize ethers.js provider
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+
+    // Get the transaction receipt
+    const receipt = await provider.getTransactionReceipt(transactionHash);
+    if (!receipt || receipt.status !== 1) {
+      return res.status(400).json({ error: "Invalid or failed transaction" });
+    }
+
+    const contract = license === "standard"
+      ? new ethers.Contract(
+        process.env.NEXT_PUBLIC_ERC1155_ADDRESS || '',
+        STANDARD_LICENSE_1155,
+        provider
+      )
+      : new ethers.Contract(
+        process.env.NEXT_PUBLIC_ERC721_ADDRESS || '',
+        EXCLUSIVE_LICENSE_721,
+        provider
+      );
+
+    // Extract the `id` from the respective event
+    const eventName = license === "standard" ? "AssetRegistered" : "AssetRegisteredExclusive";
+    const event = receipt.logs
+      .map((log) => {
+        try {
+          return contract.interface.parseLog(log);
+        } catch {
+          return null;
+        }
+      })
+      .find((parsedLog) => parsedLog && parsedLog.name === eventName);
+
+    if (!event) {
+      return res.status(400).json({ error: `${eventName} event not found in transaction` });
+    }
+
+    const [tokenId] = event?.args || [];
 
     // Save the asset in the database
     const asset = await Asset.create({
@@ -929,21 +941,21 @@ app.post("/api/assets", requireAuth, async (req, res) => {
       fileCid,
       fileSize,
       metadataCid,
-      metadataUri,
       tokenId,
       mimeType,
+      metadataUri,
       creatorAddress: req.user.wallet,
       status: "active",
       createdAt: new Date(),
       updatedAt: new Date(),
-    })
+    });
 
-    res.status(201).json({ assetId: asset._id })
+    res.status(201).json({ assetId: asset._id });
   } catch (err) {
-    console.error("Error saving asset:", err)
-    res.status(500).json({ error: "Failed to save asset" })
+    console.error("Error saving asset:", err);
+    res.status(500).json({ error: "Failed to save asset" });
   }
-})
+});
 
 app.post("/api/mint-standard", requireAuth, async (req, res) => {
   try {
